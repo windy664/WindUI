@@ -1,0 +1,114 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+    id 'idea'
+    id 'net.neoforged.moddev' version '2.0.141'
+}
+
+version = rootProject.version
+group = rootProject.group
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = "Modrinth"
+                url = "https://api.modrinth.com/maven"
+            }
+        }
+        filter {
+            includeGroup "maven.modrinth"
+        }
+    }
+}
+
+base {
+    archivesName = 'windui-1.21.1'
+}
+
+// 版本号本模块自包含。⚠️ 请按需确认/更新（尤其 neo_version 用当前稳定的 21.1.x）
+def minecraft_version = '1.21.1'
+def minecraft_version_range = '[1.21.1, 1.22)'
+def neo_version = '21.1.209'
+def neo_version_range = '[21.1.0,)'
+def loader_version_range = '[4,)'
+
+// 1.21.1 用 Java 21
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+neoForge {
+    version = neo_version
+
+    runs {
+        client {
+            client()
+            systemProperty 'neoforge.enabledGameTestNamespaces', 'windui'
+        }
+        server {
+            server()
+            programArgument '--nogui'
+            systemProperty 'neoforge.enabledGameTestNamespaces', 'windui'
+        }
+        configureEach {
+            systemProperty 'forge.logging.markers', 'REGISTRIES'
+            logLevel = org.slf4j.event.Level.DEBUG
+        }
+    }
+
+    mods {
+        'windui' {
+            sourceSet(sourceSets.main)
+        }
+    }
+}
+
+dependencies {
+    // core（协议+解析+动作）+ client_modernui（共享 ModernUI 渲染层）
+    implementation project(':core')
+    implementation project(':client_modernui')
+
+    // Modern UI 3.13.0.1 for 1.21.1 (Modrinth id=eMf1VSQd)，与 26.1.2 的 3.13.0.5 同一 3.13 API
+    implementation 'maven.modrinth:3sjzyvGR:eMf1VSQd'
+
+    // GeckoLib —— 仅编译期（软依赖，运行时由整合包提供；缺失则 GeckoLib 后端优雅降级不加载）。
+    // 用本地 jar（本项目既有本地 jar 依赖模式），不打包、不硬依赖。GeckoModelBackend 所有 GeckoLib 引用
+    // 都隔离在该类，仅 ModList.isLoaded("geckolib") 为真时才 class-load，故 GeckoLib 缺席不会 NoClassDefFound。
+    compileOnly files('libs/geckolib-neoforge-1.21.1-4.7.3.jar')
+}
+
+// NeoForge 不 shade 项目依赖，手动把 core + client_modernui 编译输出打进 jar
+jar {
+    from(project(':core').sourceSets.main.output)
+    from(project(':client_modernui').sourceSets.main.output)
+    dependsOn ':core:classes', ':client_modernui:classes'
+}
+
+var generateModMetadata = tasks.register("generateModMetadata", ProcessResources) {
+    var replaceProperties = [minecraft_version      : minecraft_version,
+                             minecraft_version_range: minecraft_version_range,
+                             neo_version            : neo_version,
+                             neo_version_range      : neo_version_range,
+                             loader_version_range   : loader_version_range,
+                             mod_id                 : 'windui',
+                             mod_name               : 'WindUI',
+                             mod_license            : 'All Rights Reserved',
+                             mod_version            : rootProject.version,
+                             mod_authors            : '',
+                             mod_description        : '']
+    inputs.properties replaceProperties
+    expand replaceProperties
+    from "src/main/templates"
+    into "build/generated/sources/modMetadata"
+}
+
+sourceSets.main.resources.srcDir generateModMetadata
+neoForge.ideSyncTask generateModMetadata
+
+idea {
+    module {
+        downloadSources = true
+        downloadJavadoc = true
+    }
+}

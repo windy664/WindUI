@@ -1,0 +1,38 @@
+// 跨 MC 版本共享的客户端渲染层（ModernUI）。平台无关——各 neoforge 模块依赖它，只写各自 glue。
+plugins {
+    id 'java-library'
+}
+
+// 关键：编到 Java 21（最低目标 MC 1.21.1）。Java 21 字节码可被更高版本(26.1.2 的 Java 25)运行时加载；
+// 反之不行，故共享模块必须用低版本。
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+repositories {
+    mavenCentral()
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = "Modrinth"
+                url = "https://api.modrinth.com/maven"
+            }
+        }
+        filter {
+            includeGroup "maven.modrinth"
+        }
+    }
+}
+
+dependencies {
+    // 传递给下游平台模块
+    api project(':core')
+
+    // ModernUI 仅编译期需要（运行时由各 neoforge 模块自带对应版本）。
+    // 用 1.21.1 的 3.13.0.1（Java21 字节码，可被 Java21 toolchain 读取）；与 26.1.2 的 3.13.0.5 同一 3.13 API。
+    // 共享代码只碰纯 ModernUI 的 view/graphics/core 类（不碰 mc 层），故编译不需要 MC classpath。
+    compileOnly 'maven.modrinth:3sjzyvGR:eMf1VSQd'
+
+    // slf4j 日志：编译期需要，运行时由 MC/NeoForge 提供
+    compileOnly 'org.slf4j:slf4j-api:2.0.13'
+
+    // 传输层已改为独立端口 WebSocket（{@code WsClient}，纯 java.net），不再依赖 Netty。
+}

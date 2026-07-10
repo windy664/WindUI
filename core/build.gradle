@@ -1,0 +1,27 @@
+plugins {
+    id 'java-library'
+}
+
+// core 被 Java 21(client_modernui/neoforge_1_21_1) 与 Java 25(neoforge_26_1_2/velocity) 共用，
+// 必须编到最低的 Java 21（纯逻辑，无需高版本特性），否则 21 侧无法依赖。
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Gson — MC 自带，只编译期需要
+    compileOnly 'com.google.code.gson:gson:2.11.0'
+    // 无运行时依赖！
+
+    // 测试（Gson 在测试期真实提供）
+    testImplementation 'com.google.code.gson:gson:2.11.0'
+    testImplementation platform('org.junit:junit-bom:5.11.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}

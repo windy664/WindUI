@@ -1,0 +1,114 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+    id 'idea'
+    id 'net.neoforged.moddev' version '2.0.141'
+}
+
+version = rootProject.version
+group = rootProject.group
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = "Modrinth"
+                url = "https://api.modrinth.com/maven"
+            }
+        }
+        filter {
+            includeGroup "maven.modrinth"
+        }
+    }
+}
+
+base {
+    archivesName = 'windui-26.1.2'
+}
+
+// 版本号本模块自包含（不依赖 root gradle.properties，避免多版本模块冲突）
+def minecraft_version = '26.1.2'
+def minecraft_version_range = '[26.1.2, 26.2)'
+def neo_version = '26.1.2.78'
+def neo_version_range = '[26.1.2,)'
+def loader_version_range = '[4,)'
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(25)
+
+neoForge {
+    version = neo_version
+
+    runs {
+        client {
+            client()
+            systemProperty 'neoforge.enabledGameTestNamespaces', 'windui'
+        }
+        server {
+            server()
+            programArgument '--nogui'
+            systemProperty 'neoforge.enabledGameTestNamespaces', 'windui'
+        }
+        data {
+            clientData()
+            programArguments.addAll '--mod', 'windui', '--all', '--output', file('src/generated/resources/').getAbsolutePath(), '--existing', file('src/main/resources/').getAbsolutePath()
+        }
+        configureEach {
+            systemProperty 'forge.logging.markers', 'REGISTRIES'
+            logLevel = org.slf4j.event.Level.DEBUG
+        }
+    }
+
+    mods {
+        'windui' {
+            sourceSet(sourceSets.main)
+        }
+    }
+}
+
+sourceSets.main.resources { srcDir 'src/generated/resources' }
+
+dependencies {
+    // core（协议+解析+动作）+ client_modernui（共享 ModernUI 渲染层，含 core）
+    implementation project(':core')
+    implementation project(':client_modernui')
+
+    // Modern UI 3.13.0.5 for 26.1.2 (from Modrinth)
+    implementation 'maven.modrinth:3sjzyvGR:pDpDBt4H'
+}
+
+// NeoForge 不 shade 项目依赖，需手动把 core + client_modernui 的编译输出打进最终 jar
+jar {
+    from(project(':core').sourceSets.main.output)
+    from(project(':client_modernui').sourceSets.main.output)
+    dependsOn ':core:classes', ':client_modernui:classes'
+}
+
+var generateModMetadata = tasks.register("generateModMetadata", ProcessResources) {
+    var replaceProperties = [minecraft_version      : minecraft_version,
+                             minecraft_version_range: minecraft_version_range,
+                             neo_version            : neo_version,
+                             neo_version_range      : neo_version_range,
+                             loader_version_range   : loader_version_range,
+                             mod_id                 : 'windui',
+                             mod_name               : 'WindUI',
+                             mod_license            : 'All Rights Reserved',
+                             mod_version            : rootProject.version,
+                             mod_authors            : '',
+                             mod_description        : '']
+    inputs.properties replaceProperties
+    expand replaceProperties
+    from "src/main/templates"
+    into "build/generated/sources/modMetadata"
+}
+
+sourceSets.main.resources.srcDir generateModMetadata
+neoForge.ideSyncTask generateModMetadata
+
+idea {
+    module {
+        downloadSources = true
+        downloadJavadoc = true
+    }
+}

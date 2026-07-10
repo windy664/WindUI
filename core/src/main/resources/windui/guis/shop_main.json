@@ -1,0 +1,56 @@
+{
+  "type": "LinearLayout",
+  "props": { "orientation": 1, "gravity": "center", "padding": 14 },
+  "children": [
+    { "type": "TextView", "props": { "text": "WindUI 商店", "textSize": 24, "textColor": "#FFD700", "padding": 4 } },
+    { "type": "TextView", "props": { "text": "你好, %player_name% · 所在子服: %player_server%", "textSize": 13, "textColor": "#8B97A6", "padding": 4 } },
+
+    {
+      "type": "LinearLayout",
+      "props": { "orientation": 0, "gravity": "center", "padding": 6 },
+      "children": [
+        { "type": "ImageView", "props": { "src": "minecraft:textures/item/diamond.png", "width": 36, "height": 36, "padding": 4 } },
+        {
+          "type": "LinearLayout",
+          "props": { "orientation": 1, "padding": 4 },
+          "children": [
+            { "type": "TextView", "props": { "text": "钻石", "textSize": 15, "textColor": "#66E0A3" } },
+            { "type": "TextView", "props": { "text": "单价 100 金币", "textSize": 12, "textColor": "#8B97A6" } }
+          ]
+        },
+        {
+          "type": "Button",
+          "props": { "text": "购买", "textSize": 14, "textColor": "#FFD700", "padding": 6 },
+          "onClick": { "action": "callback", "id": "buy_diamond", "data": ["1"] }
+        }
+      ]
+    },
+
+    {
+      "type": "LinearLayout",
+      "props": { "orientation": 0, "gravity": "center", "padding": 6 },
+      "children": [
+        { "type": "ImageView", "props": { "src": "minecraft:textures/item/gold_ingot.png", "width": 36, "height": 36, "padding": 4 } },
+        {
+          "type": "LinearLayout",
+          "props": { "orientation": 1, "padding": 4 },
+          "children": [
+            { "type": "TextView", "props": { "text": "金锭", "textSize": 15, "textColor": "#FFD700" } },
+            { "type": "TextView", "props": { "text": "单价 20 金币", "textSize": 12, "textColor": "#8B97A6" } }
+          ]
+        },
+        {
+          "type": "Button",
+          "props": { "text": "购买", "textSize": 14, "textColor": "#FFD700", "padding": 6 },
+          "onClick": { "action": "callback", "id": "buy_gold", "data": ["1"] }
+        }
+      ]
+    },
+
+    {
+      "type": "Button",
+      "props": { "text": "关闭界面", "textSize": 15, "textColor": "#FF6B6B", "padding": 6 },
+      "onClick": { "action": "closeScreen" }
+    }
+  ]
+}

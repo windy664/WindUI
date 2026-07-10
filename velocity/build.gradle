@@ -1,0 +1,34 @@
+plugins {
+    id 'java-library'
+}
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(25)
+
+// 产物命名:windui-velocity-<version>.jar(默认会取子项目名 velocity,与 Velocity 本体撞概念、看不出是啥)
+base {
+    archivesName = 'windui-velocity'
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://repo.papermc.io/repository/maven-public/' }
+}
+
+dependencies {
+    // core（协议+解析+占位符+GUI注册表）+ server_core（JS引擎+效果模型，含 Rhino）
+    implementation project(':core')
+    implementation project(':server_core')
+
+    // Velocity API
+    compileOnly 'com.velocitypowered:velocity-api:3.3.0-SNAPSHOT'
+    annotationProcessor 'com.velocitypowered:velocity-api:3.3.0-SNAPSHOT'
+}
+
+// 手动把 core + server_core 的编译输出 + Rhino 库内容打进最终 jar（不引 shadow 插件）
+jar {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from(project(':core').sourceSets.main.output)
+    from(project(':server_core').sourceSets.main.output)
+    from({ configurations.runtimeClasspath.findAll { it.name.contains('rhino') }.collect { zipTree(it) } })
+    dependsOn ':core:classes', ':server_core:classes'
+}

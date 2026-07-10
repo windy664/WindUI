@@ -1,0 +1,22 @@
+{
+  "type": "LinearLayout",
+  "props": { "orientation": 1, "gravity": "center", "padding": 22 },
+  "children": [
+    {
+      "type": "LinearLayout",
+      "props": { "orientation": 1, "gravity": "center", "background": "#14FFFFFF", "border": "#26FFFFFF", "radius": 16, "padding": 18 },
+      "children": [
+        { "type": "TextView", "props": { "text": "确认操作", "textSize": 22, "textColor": "#EAF2FF" } },
+        { "type": "TextView", "props": { "text": "确定要执行此操作吗？此操作不可撤销。", "textSize": 13, "textColor": "#B8C4D6", "margin": 6 } },
+        {
+          "type": "LinearLayout",
+          "props": { "orientation": 0, "gravity": "center" },
+          "children": [
+            { "type": "Button", "props": { "text": "确认", "textSize": 15, "textColor": "#66E0A3", "margin": 4 }, "onClick": [ { "action": "callback", "id": "confirm_yes", "data": [] }, { "action": "closeScreen" } ] },
+            { "type": "Button", "props": { "text": "取消", "textSize": 15, "textColor": "#8B97A6", "margin": 4 }, "onClick": { "action": "closeScreen" } }
+          ]
+        }
+      ]
+    }
+  ]
+}

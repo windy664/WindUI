@@ -1,0 +1,31 @@
+// 跨平台共享的服务端逻辑层：JS 引擎（Rhino）+ 效果模型 + GUI 驱动。
+// 平台无关——velocity / 未来 bukkit 各自只写薄 glue（实现 UiHost、提供 ctx 数据、执行发包）。
+plugins {
+    id 'java-library'
+}
+
+// 与 core 一致编到 Java 21（服务端 velocity 跑 Java 25 能加载；未来 Paper 1.21.1 是 Java 21）。
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // 协议 + 解析 + 占位符 + GUI 注册表（对下游平台可见）
+    api project(':core')
+
+    // Rhino —— 服务端 JS 引擎（纯 Java 库，非模组）。AI 写的界面脚本在服务端跑。
+    api 'org.mozilla:rhino:1.7.15'
+
+    // 测试：Gson 运行时由平台(velocity/MC)提供；core 的协议编解码(ControlCodec)编译期用它，
+    // 故 server_core 测试需真实提供 Gson 才能跑通控制频道相关用例。
+    testImplementation 'com.google.code.gson:gson:2.11.0'
+    testImplementation platform('org.junit:junit-bom:5.11.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}

@@ -1,0 +1,17 @@
+{
+  "type": "LinearLayout",
+  "props": { "orientation": 1, "gravity": "center", "padding": 22 },
+  "children": [
+    {
+      "type": "LinearLayout",
+      "props": { "orientation": 1, "background": "#14FFFFFF", "border": "#26FFFFFF", "radius": 16, "padding": 16 },
+      "children": [
+        { "type": "TextView", "props": { "text": "服务器菜单", "textSize": 24, "textColor": "#EAF2FF" } },
+        { "type": "TextView", "props": { "text": "你好 %player_name%  ·  在线 %server_online% 人", "textSize": 12, "textColor": "#7E8CA0", "margin": 2 } },
+        { "type": "Button", "props": { "text": "商店", "textSize": 15, "textColor": "#66E0A3", "margin": 3 }, "onClick": { "action": "executeCommand", "args": ["/windui open shop"] } },
+        { "type": "Button", "props": { "text": "返回出生点", "textSize": 15, "textColor": "#4FA3FF", "margin": 3 }, "onClick": [ { "action": "executeCommand", "args": ["/spawn"] }, { "action": "closeScreen" } ] },
+        { "type": "Button", "props": { "text": "关闭", "textSize": 14, "textColor": "#8B97A6", "margin": 3 }, "onClick": { "action": "closeScreen" } }
+      ]
+    }
+  ]
+}

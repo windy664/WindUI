@@ -1,0 +1,24 @@
+[
+  {
+    "anchor": "top_right",
+    "x": 6,
+    "y": 6,
+    "root": {
+      "type": "LinearLayout",
+      "props": { "orientation": 1, "background": "#B00A1830", "border": "#3366E0A3", "padding": 6 },
+      "children": [
+        { "type": "Markdown", "props": { "text": "§bWindUI HUD\n§f金币 §e1,280\n§f在线 §a42", "textColor": "#EAF2FF" } },
+        { "type": "Divider", "props": { "width": 110, "margin": 2 } },
+        {
+          "type": "LinearLayout", "props": { "orientation": 0 },
+          "children": [
+            { "type": "ItemSlot", "props": { "item": "minecraft:diamond", "count": 64, "margin": 1 } },
+            { "type": "ItemSlot", "props": { "item": "minecraft:gold_ingot", "count": 32, "margin": 1 } },
+            { "type": "ItemSlot", "props": { "item": "minecraft:emerald", "count": 5, "margin": 1 } }
+          ]
+        },
+        { "type": "Bar", "props": { "value": 0.6, "width": 110, "height": 5, "color": "#66E0A3" } }
+      ]
+    }
+  }
+]
