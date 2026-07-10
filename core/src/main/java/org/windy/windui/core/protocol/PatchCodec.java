@@ -1,16 +1,9 @@
 package org.windy.windui.core.protocol;
 
-import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
-import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -38,29 +31,30 @@ public final class PatchCodec {
      * @param props 要覆盖的属性（仅这些键被改，其余保持不变）
      */
     public record Patch(String id, Map<String, Object> props) {
+        public Patch {
+            if (id == null || id.isBlank()) {
+                throw new IllegalArgumentException("patch id 不能为空");
+            }
+            props = props == null ? Map.of() : Map.copyOf(props);
+        }
     }
 
     /** 把已是 JSON（对象或数组）的 patch 串编码为可发送字节。 */
     public static byte[] encode(String json) {
-        byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
-        ByteArrayOutputStream buf = new ByteArrayOutputStream(bytes.length + 4);
-        try (DataOutputStream out = new DataOutputStream(buf)) {
-            out.writeInt(bytes.length);
-            out.write(bytes);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-        return buf.toByteArray();
+        return WireCodecSupport.frameUtf8(json, "patch json");
     }
 
-    /** 解出 patch 列表（客户端用）。非法/空返回空列表。 */
+    /**
+     * 解出 patch 列表（客户端用）。
+     * 线格式损坏、非法 UTF-8 或非法 JSON 会抛异常，由 WebSocket 回调隔离层记录并跳过本条消息。
+     */
     public static List<Patch> decode(byte[] data) {
         List<Patch> out = new ArrayList<>();
-        String json = unframe(data);
+        String json = WireCodecSupport.unframeUtf8(data, "patch json");
         JsonElement root = JsonParser.parseString(json);
         if (root.isJsonArray()) {
-            for (JsonElement el : root.getAsJsonArray()) {
-                addPatch(out, el);
+            for (JsonElement element : root.getAsJsonArray()) {
+                addPatch(out, element);
             }
         } else {
             addPatch(out, root);
@@ -68,42 +62,42 @@ public final class PatchCodec {
         return out;
     }
 
-    private static void addPatch(List<Patch> out, JsonElement el) {
-        if (!el.isJsonObject()) return;
-        JsonObject obj = el.getAsJsonObject();
-        if (!obj.has("id")) return;
-        String id = obj.get("id").getAsString();
+    private static void addPatch(List<Patch> out, JsonElement element) {
+        if (!element.isJsonObject()) {
+            return;
+        }
+
+        JsonObject object = element.getAsJsonObject();
+        if (!object.has("id") || !object.get("id").isJsonPrimitive()) {
+            return;
+        }
+
+        String id = object.get("id").getAsString();
+        if (id.isBlank()) {
+            return;
+        }
+
         Map<String, Object> props = new LinkedHashMap<>();
-        if (obj.has("props") && obj.get("props").isJsonObject()) {
-            for (Map.Entry<String, JsonElement> e : obj.getAsJsonObject("props").entrySet()) {
-                props.put(e.getKey(), toPlain(e.getValue()));
+        if (object.has("props") && object.get("props").isJsonObject()) {
+            for (Map.Entry<String, JsonElement> entry : object.getAsJsonObject("props").entrySet()) {
+                props.put(entry.getKey(), toPlain(entry.getValue()));
             }
         }
         out.add(new Patch(id, props));
     }
 
     /** patch 属性值均为标量（text/color=String, size/alpha/value=Number, visible/enable=Boolean）。 */
-    private static Object toPlain(JsonElement el) {
-        if (el.isJsonPrimitive()) {
-            var p = el.getAsJsonPrimitive();
-            if (p.isBoolean()) return p.getAsBoolean();
-            if (p.isNumber()) return p.getAsNumber();
-            return p.getAsString();
-        }
-        return el.isJsonNull() ? null : el.toString();
-    }
-
-    private static String unframe(byte[] data) {
-        try (DataInputStream in = new DataInputStream(new java.io.ByteArrayInputStream(data))) {
-            int len = in.readInt();
-            if (len < 0 || len > data.length) {
-                throw new IllegalArgumentException("bad jsonLen " + len);
+    private static Object toPlain(JsonElement element) {
+        if (element.isJsonPrimitive()) {
+            var primitive = element.getAsJsonPrimitive();
+            if (primitive.isBoolean()) {
+                return primitive.getAsBoolean();
             }
-            byte[] json = new byte[len];
-            in.readFully(json);
-            return new String(json, StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+            if (primitive.isNumber()) {
+                return primitive.getAsNumber();
+            }
+            return primitive.getAsString();
         }
+        return element.isJsonNull() ? null : element.toString();
     }
 }

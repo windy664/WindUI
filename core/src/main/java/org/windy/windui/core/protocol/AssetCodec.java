@@ -1,11 +1,7 @@
 package org.windy.windui.core.protocol;
 
-import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
+import java.nio.ByteBuffer;
+import java.util.Arrays;
 
 /**
  * 图片资源包（{@link WindUIProtocol#ASSET_CHANNEL}）线格式编解码。两端共用。
@@ -16,37 +12,52 @@ import java.nio.charset.StandardCharsets;
  */
 public final class AssetCodec {
 
+    /** hash 是缓存键，不应承载任意大字符串。当前短 SHA-256 为 16 字节，预留到 256 字节便于演进。 */
+    private static final int MAX_HASH_BYTES = 256;
+
     private AssetCodec() {
     }
 
-    /** 编码为可通过 Plugin Message 发送的字节：{@code [hashLen][hash][png]}。 */
+    /** 编码为可发送的字节：{@code [hashLen][hash][png]}。PNG 允许为空，由图片解码层决定是否可用。 */
     public static byte[] encode(String hash, byte[] png) {
-        byte[] h = hash.getBytes(StandardCharsets.UTF_8);
-        ByteArrayOutputStream buf = new ByteArrayOutputStream(h.length + png.length + 4);
-        try (DataOutputStream out = new DataOutputStream(buf)) {
-            out.writeInt(h.length);
-            out.write(h);
-            out.write(png);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+        byte[] h = WireCodecSupport.encodeUtf8(hash, "asset hash", MAX_HASH_BYTES, false);
+        if (png == null) {
+            throw new IllegalArgumentException("png 不能为空");
         }
-        return buf.toByteArray();
+        if (png.length > Integer.MAX_VALUE - Integer.BYTES - h.length) {
+            throw new IllegalArgumentException("asset payload 过大");
+        }
+
+        ByteBuffer buffer = ByteBuffer.allocate(Integer.BYTES + h.length + png.length);
+        buffer.putInt(h.length);
+        buffer.put(h);
+        buffer.put(png);
+        return buffer.array();
     }
 
     /** 解码 {@link #encode} 的字节为 {@link Asset}。 */
     public static Asset decode(byte[] data) {
-        try (DataInputStream in = new DataInputStream(new java.io.ByteArrayInputStream(data))) {
-            int hashLen = in.readInt();
-            if (hashLen < 0 || hashLen > data.length) {
-                throw new IllegalArgumentException("bad hashLen " + hashLen);
-            }
-            byte[] h = new byte[hashLen];
-            in.readFully(h);
-            byte[] png = in.readAllBytes();
-            return new Asset(new String(h, StandardCharsets.UTF_8), png);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+        if (data == null) {
+            throw new IllegalArgumentException("asset frame 不能为空");
         }
+        if (data.length < Integer.BYTES) {
+            throw new IllegalArgumentException("asset frame 过短: " + data.length);
+        }
+
+        ByteBuffer buffer = ByteBuffer.wrap(data);
+        int hashLen = buffer.getInt();
+        WireCodecSupport.validateLength(hashLen, "asset hash", MAX_HASH_BYTES, false);
+        if (hashLen > buffer.remaining()) {
+            throw new IllegalArgumentException(
+                    "bad hashLen " + hashLen + ", remaining " + buffer.remaining());
+        }
+
+        byte[] hashBytes = new byte[hashLen];
+        buffer.get(hashBytes);
+        String hash = WireCodecSupport.decodeUtf8(hashBytes, "asset hash");
+
+        byte[] png = Arrays.copyOfRange(data, buffer.position(), data.length);
+        return new Asset(hash, png);
     }
 
     /**
@@ -56,5 +67,19 @@ public final class AssetCodec {
      * @param png  PNG 字节
      */
     public record Asset(String hash, byte[] png) {
+        public Asset {
+            if (hash == null || hash.isEmpty()) {
+                throw new IllegalArgumentException("asset hash 不能为空");
+            }
+            if (png == null) {
+                throw new IllegalArgumentException("png 不能为空");
+            }
+            png = png.clone();
+        }
+
+        @Override
+        public byte[] png() {
+            return png.clone();
+        }
     }
 }

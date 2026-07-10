@@ -3,12 +3,6 @@ package org.windy.windui.core.protocol;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
-import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
@@ -33,51 +27,51 @@ public final class ControlCodec {
      * @param args   参数列表（可空）
      */
     public record CtrlAction(String action, List<String> args) {
+        public CtrlAction {
+            if (action == null || action.isBlank()) {
+                throw new IllegalArgumentException("control action 不能为空");
+            }
+            args = args == null ? List.of() : List.copyOf(args);
+        }
+
         public static CtrlAction of(String action, String... args) {
-            return new CtrlAction(action, List.of(args));
+            return new CtrlAction(action, args == null ? List.of() : List.of(args));
         }
     }
 
-    /** 把动作列表编码为可通过 Plugin Message 发送的字节。 */
+    /** 把动作列表编码为可发送字节。 */
     public static byte[] encode(List<CtrlAction> actions) {
+        if (actions == null) {
+            throw new IllegalArgumentException("actions 不能为空");
+        }
+
         JsonArray arr = new JsonArray();
-        for (CtrlAction a : actions) {
-            JsonObject o = new JsonObject();
-            o.addProperty("action", a.action());
+        for (CtrlAction action : actions) {
+            if (action == null) {
+                throw new IllegalArgumentException("actions 不得包含 null");
+            }
+
+            JsonObject object = new JsonObject();
+            object.addProperty("action", action.action());
+
             JsonArray args = new JsonArray();
-            if (a.args() != null) {
-                for (String s : a.args()) args.add(s);
+            for (String value : action.args()) {
+                if (value == null) {
+                    throw new IllegalArgumentException("control action 参数不得为 null");
+                }
+                args.add(value);
             }
-            o.add("args", args);
-            arr.add(o);
+            object.add("args", args);
+            arr.add(object);
         }
-        return frame(arr.toString());
+        return WireCodecSupport.frameUtf8(arr.toString(), "control json");
     }
 
-    /** 解出控制帧里的 JSON 字符串（客户端拿去 {@code UIJsonParser.parseActions} 解析）。 */
+    /**
+     * 解出控制帧里的 JSON 字符串（客户端拿去 {@code UIJsonParser.parseActions} 解析）。
+     * 长度必须精确匹配，拒绝截断、尾随数据和非法 UTF-8。
+     */
     public static String decodeJson(byte[] data) {
-        try (DataInputStream in = new DataInputStream(new java.io.ByteArrayInputStream(data))) {
-            int len = in.readInt();
-            if (len < 0 || len > data.length) {
-                throw new IllegalArgumentException("bad jsonLen " + len);
-            }
-            byte[] json = new byte[len];
-            in.readFully(json);
-            return new String(json, StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    private static byte[] frame(String json) {
-        byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
-        ByteArrayOutputStream buf = new ByteArrayOutputStream(bytes.length + 4);
-        try (DataOutputStream out = new DataOutputStream(buf)) {
-            out.writeInt(bytes.length);
-            out.write(bytes);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-        return buf.toByteArray();
+        return WireCodecSupport.unframeUtf8(data, "control json");
     }
 }

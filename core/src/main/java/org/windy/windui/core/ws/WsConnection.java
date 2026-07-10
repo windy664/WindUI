@@ -13,7 +13,8 @@ import java.util.concurrent.locks.ReentrantLock;
  * <p>
  * 只暴露“发一条二进制消息 / 收一条数据消息”，内部处理分片重组、ping→pong、close。控制帧对上层透明。
  * {@code maskOutbound} 决定出站是否加掩码：按 RFC，<b>客户端→服务端必须加掩码，服务端→客户端不得加</b>，
- * 故客户端侧传 {@code true}、服务端侧传 {@code false}。收帧按实际 MASK 位解码。
+ * 故客户端侧传 {@code true}、服务端侧传 {@code false}。入站方向会据此严格校验：
+ * 服务端必须收到带掩码帧，客户端必须收到不带掩码帧。
  * <p>
  * 线程模型：单读线程调 {@link #recv()}；{@link #send} 可被任意线程调（服务端渲染线程推 UI）。写加锁互斥。
  */
@@ -34,9 +35,10 @@ public final class WsConnection implements AutoCloseable {
     // 用 ReentrantLock 而非 synchronized：虚拟线程（Loom）下若写操作阻塞（慢客户端 send 缓冲满），
     // synchronized 会钉住载体线程；ReentrantLock 则挂起虚拟线程、释放载体。
     private final ReentrantLock writeLock = new ReentrantLock();
-    private final SecureRandom rnd = new SecureRandom();
+    private final SecureRandom random = new SecureRandom();
 
     private volatile boolean closed;
+    private volatile boolean closeSent;
 
     public WsConnection(InputStream in, OutputStream out, boolean maskOutbound, int maxMessageBytes) {
         if (in == null || out == null) {
@@ -78,7 +80,8 @@ public final class WsConnection implements AutoCloseable {
                     // pong 对应用层透明
                 }
                 case OP_CLOSE -> {
-                    sendCloseReply();
+                    sendCloseReply(frame.payload);
+                    closed = true;
                     throw new EOFException("对端关闭 WebSocket");
                 }
                 case OP_TEXT, OP_BINARY -> {
@@ -88,16 +91,17 @@ public final class WsConnection implements AutoCloseable {
                     if (frame.fin) {
                         return frame.payload;
                     }
-                    message = new ByteArrayOutputStream(Math.min(frame.payload.length + 32, maxMessageBytes));
-                    message.write(frame.payload);
-                    guardSize(message.size());
+
+                    int initialCapacity = Math.min(
+                            maxMessageBytes, Math.max(32, frame.payload.length));
+                    message = new ByteArrayOutputStream(initialCapacity);
+                    appendFragment(message, frame.payload);
                 }
                 case OP_CONT -> {
                     if (message == null) {
                         throw new IOException("意外的 WebSocket 续帧");
                     }
-                    message.write(frame.payload);
-                    guardSize(message.size());
+                    appendFragment(message, frame.payload);
                     if (frame.fin) {
                         return message.toByteArray();
                     }
@@ -112,20 +116,20 @@ public final class WsConnection implements AutoCloseable {
     }
 
     /**
-     * 发起规范关闭并释放流。Close 帧必须在 {@code closed=true} 之前写出；
-     * 旧实现先置 closed 再调发送，导致 Close 帧永远不会真正发送。
+     * 发起规范关闭并释放流。Close 帧必须在 {@code closed=true} 之前写出。
+     * 并发或重复调用是幂等的，不会重复发送 Close 帧。
      */
     @Override
     public void close() {
         writeLock.lock();
         try {
-            if (closed) {
-                return;
-            }
-            try {
-                writeFrameLocked(OP_CLOSE, new byte[0]);
-            } catch (IOException ignored) {
-                // 对端可能已经断开；仍继续关闭本地资源
+            if (!closed && !closeSent) {
+                try {
+                    writeFrameLocked(OP_CLOSE, new byte[0]);
+                    closeSent = true;
+                } catch (IOException ignored) {
+                    // 对端可能已经断开；仍继续关闭本地资源
+                }
             }
             closed = true;
         } finally {
@@ -154,19 +158,42 @@ public final class WsConnection implements AutoCloseable {
         int opcode = b0 & 0x0F;
         boolean control = opcode >= 0x8;
 
+        if (!isKnownOpcode(opcode)) {
+            throw new IOException("未知 WebSocket opcode: " + opcode);
+        }
+
         int b1 = readByte();
         boolean masked = (b1 & 0x80) != 0;
-        long len = b1 & 0x7F;
 
-        if (len == 126) {
-            len = ((long) readByte() << 8) | readByte();
-        } else if (len == 127) {
-            len = 0;
-            for (int i = 0; i < 8; i++) {
-                len = (len << 8) | readByte();
+        // 本端出站加掩码说明本端是客户端，因此入站服务端帧不得掩码；
+        // 本端出站不加掩码说明本端是服务端，因此入站客户端帧必须掩码。
+        boolean expectedMasked = !maskOutbound;
+        if (masked != expectedMasked) {
+            throw new IOException(expectedMasked
+                    ? "客户端发往服务端的 WebSocket 帧必须带掩码"
+                    : "服务端发往客户端的 WebSocket 帧不得带掩码");
+        }
+
+        int lengthCode = b1 & 0x7F;
+        long length;
+        if (lengthCode < 126) {
+            length = lengthCode;
+        } else if (lengthCode == 126) {
+            length = ((long) readByte() << 8) | readByte();
+            if (length < 126) {
+                throw new IOException("WebSocket 负载使用了非最短 16 位长度编码");
             }
-            if (len < 0) {
-                throw new IOException("非法 WebSocket 64 位负载长度");
+        } else {
+            int firstLengthByte = readByte();
+            if ((firstLengthByte & 0x80) != 0) {
+                throw new IOException("WebSocket 64 位负载长度最高位不得为 1");
+            }
+            length = firstLengthByte;
+            for (int i = 1; i < 8; i++) {
+                length = (length << 8) | readByte();
+            }
+            if (length <= 0xFFFFL) {
+                throw new IOException("WebSocket 负载使用了非最短 64 位长度编码");
             }
         }
 
@@ -174,24 +201,26 @@ public final class WsConnection implements AutoCloseable {
             if (!fin) {
                 throw new IOException("WebSocket 控制帧不得分片");
             }
-            if (len > 125) {
-                throw new IOException("WebSocket 控制帧负载过大: " + len);
+            if (length > 125) {
+                throw new IOException("WebSocket 控制帧负载过大: " + length);
+            }
+            if (opcode == OP_CLOSE && length == 1) {
+                throw new IOException("WebSocket Close 帧负载长度不得为 1");
             }
         }
 
-        if (len > maxMessageBytes) {
-            throw new IOException("WebSocket 帧过大: " + len);
+        if (length > maxMessageBytes) {
+            throw new IOException("WebSocket 帧过大: " + length);
         }
 
-        byte[] mask = null;
+        byte[] mask = new byte[4];
         if (masked) {
-            mask = new byte[4];
             readFully(mask);
         }
 
-        byte[] payload = new byte[(int) len];
+        byte[] payload = new byte[(int) length];
         readFully(payload);
-        if (mask != null) {
+        if (masked) {
             for (int i = 0; i < payload.length; i++) {
                 payload[i] ^= mask[i & 3];
             }
@@ -207,6 +236,9 @@ public final class WsConnection implements AutoCloseable {
                 throw new IOException("WebSocket 已关闭");
             }
             writeFrameLocked(opcode, payload);
+            if (opcode == OP_CLOSE) {
+                closeSent = true;
+            }
         } finally {
             writeLock.unlock();
         }
@@ -214,34 +246,34 @@ public final class WsConnection implements AutoCloseable {
 
     /** 调用者必须持有 {@link #writeLock}。 */
     private void writeFrameLocked(int opcode, byte[] payload) throws IOException {
-        int len = payload.length;
+        int length = payload.length;
         out.write(0x80 | opcode);
 
         int maskBit = maskOutbound ? 0x80 : 0x00;
-        if (len < 126) {
-            out.write(maskBit | len);
-        } else if (len <= 0xFFFF) {
+        if (length < 126) {
+            out.write(maskBit | length);
+        } else if (length <= 0xFFFF) {
             out.write(maskBit | 126);
-            out.write((len >>> 8) & 0xFF);
-            out.write(len & 0xFF);
+            out.write((length >>> 8) & 0xFF);
+            out.write(length & 0xFF);
         } else {
             out.write(maskBit | 127);
-            long longLen = len;
+            long longLength = length;
             for (int i = 7; i >= 0; i--) {
-                out.write((int) ((longLen >>> (8 * i)) & 0xFF));
+                out.write((int) ((longLength >>> (8 * i)) & 0xFF));
             }
         }
 
         if (maskOutbound) {
             byte[] key = new byte[4];
-            rnd.nextBytes(key);
+            random.nextBytes(key);
             out.write(key);
 
             // 避免为大图再分配一份完整 masked 数组，按块异或写出，降低峰值内存。
-            byte[] chunk = new byte[Math.min(8192, Math.max(1, len))];
+            byte[] chunk = new byte[Math.min(8192, Math.max(1, length))];
             int offset = 0;
-            while (offset < len) {
-                int count = Math.min(chunk.length, len - offset);
+            while (offset < length) {
+                int count = Math.min(chunk.length, length - offset);
                 for (int i = 0; i < count; i++) {
                     int sourceIndex = offset + i;
                     chunk[i] = (byte) (payload[sourceIndex] ^ key[sourceIndex & 3]);
@@ -257,11 +289,31 @@ public final class WsConnection implements AutoCloseable {
     }
 
     /** 回应对端 Close；不立即关闭输入流，让上层 finally 统一释放。 */
-    private void sendCloseReply() {
+    private void sendCloseReply(byte[] payload) {
+        writeLock.lock();
         try {
-            writeFrame(OP_CLOSE, new byte[0]);
-        } catch (IOException ignored) {
+            if (closeSent) {
+                return;
+            }
+            try {
+                writeFrameLocked(OP_CLOSE, payload);
+                closeSent = true;
+            } catch (IOException ignored) {
+            }
+        } finally {
+            writeLock.unlock();
         }
+    }
+
+    /**
+     * 在写入 ByteArrayOutputStream 前检查累计消息大小，避免先扩容到超限尺寸、随后才报错。
+     */
+    private void appendFragment(ByteArrayOutputStream message, byte[] fragment) throws IOException {
+        if (fragment.length > maxMessageBytes - message.size()) {
+            throw new IOException(
+                    "WebSocket 分片消息过大: " + ((long) message.size() + fragment.length));
+        }
+        message.write(fragment);
     }
 
     private void closeStreams() {
@@ -281,20 +333,32 @@ public final class WsConnection implements AutoCloseable {
         }
     }
 
-    private int readByte() throws IOException {
-        int b = in.read();
-        if (b == -1) {
-            throw new EOFException("WebSocket 流结束");
-        }
-        return b;
+    private static boolean isKnownOpcode(int opcode) {
+        return opcode == OP_CONT
+                || opcode == OP_TEXT
+                || opcode == OP_BINARY
+                || opcode == OP_CLOSE
+                || opcode == OP_PING
+                || opcode == OP_PONG;
     }
 
-    private void readFully(byte[] dst) throws IOException {
+    private int readByte() throws IOException {
+        int value = in.read();
+        if (value == -1) {
+            throw new EOFException("WebSocket 流结束");
+        }
+        return value;
+    }
+
+    private void readFully(byte[] destination) throws IOException {
         int offset = 0;
-        while (offset < dst.length) {
-            int count = in.read(dst, offset, dst.length - offset);
+        while (offset < destination.length) {
+            int count = in.read(destination, offset, destination.length - offset);
             if (count == -1) {
                 throw new EOFException("WebSocket 流结束（读负载）");
+            }
+            if (count == 0) {
+                continue;
             }
             offset += count;
         }

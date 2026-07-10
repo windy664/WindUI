@@ -2,7 +2,10 @@ package org.windy.windui.core.ws;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
+import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -30,8 +33,8 @@ class WsTest {
         PipedOutputStream s2cOut = new PipedOutputStream();
         PipedInputStream s2cIn = new PipedInputStream(s2cOut, 1 << 16);
 
-        WsConnection client = new WsConnection(s2cIn, c2sOut, true, 1 << 20);   // 加掩码
-        WsConnection server = new WsConnection(c2sIn, s2cOut, false, 1 << 20);  // 不加掩码
+        WsConnection client = new WsConnection(s2cIn, c2sOut, true, 1 << 20);
+        WsConnection server = new WsConnection(c2sIn, s2cOut, false, 1 << 20);
 
         byte[] up = "上行：你好服务端".getBytes(StandardCharsets.UTF_8);
         client.send(up);
@@ -47,19 +50,26 @@ class WsTest {
     void largePayloadRoundTrips() throws Exception {
         PipedOutputStream out = new PipedOutputStream();
         PipedInputStream in = new PipedInputStream(out, 1 << 20);
-        WsConnection sender = new WsConnection(new PipedInputStream(), out, false, 1 << 22);
-        WsConnection receiver = new WsConnection(in, new PipedOutputStream(), false, 1 << 22);
 
-        byte[] big = new byte[200_000]; // > 0xFFFF，触发 64 位长度
-        for (int i = 0; i < big.length; i++) big[i] = (byte) (i * 31);
-        // 在独立线程发，避免管线缓冲区写满阻塞
-        new Thread(() -> {
+        // 服务端出站不掩码；接收端按客户端角色构造，因此要求入站不掩码。
+        WsConnection sender = new WsConnection(new PipedInputStream(), out, false, 1 << 22);
+        WsConnection receiver = new WsConnection(in, new PipedOutputStream(), true, 1 << 22);
+
+        byte[] big = new byte[200_000];
+        for (int i = 0; i < big.length; i++) {
+            big[i] = (byte) (i * 31);
+        }
+
+        Thread writer = new Thread(() -> {
             try {
                 sender.send(big);
             } catch (Exception ignored) {
             }
-        }).start();
+        });
+        writer.start();
+
         assertArrayEquals(big, receiver.recv());
+        writer.join(3000);
     }
 
     /** 对端 close 帧使 recv 抛 EOFException。 */
@@ -67,38 +77,124 @@ class WsTest {
     void closeSignalsEof() throws Exception {
         PipedOutputStream out = new PipedOutputStream();
         PipedInputStream in = new PipedInputStream(out, 1 << 16);
-        WsConnection a = new WsConnection(new PipedInputStream(), out, true, 1 << 20);
-        WsConnection b = new WsConnection(in, new PipedOutputStream(), false, 1 << 20);
-        a.close(); // 发 close 帧
-        assertThrows(EOFException.class, b::recv);
+        WsConnection client = new WsConnection(new PipedInputStream(), out, true, 1 << 20);
+        WsConnection server = new WsConnection(in, new ByteArrayOutputStream(), false, 1 << 20);
+
+        client.close();
+        assertThrows(EOFException.class, server::recv);
+    }
+
+    /** 服务端必须拒绝未加掩码的客户端帧。 */
+    @Test
+    void serverRejectsUnmaskedClientFrame() {
+        byte[] unmaskedBinary = new byte[]{
+                (byte) 0x82,
+                0x01,
+                0x55
+        };
+        WsConnection server = new WsConnection(
+                new ByteArrayInputStream(unmaskedBinary),
+                new ByteArrayOutputStream(),
+                false,
+                1024);
+
+        assertThrows(IOException.class, server::recv);
+    }
+
+    /** 客户端必须拒绝错误地带掩码的服务端帧。 */
+    @Test
+    void clientRejectsMaskedServerFrame() {
+        byte[] maskedBinary = new byte[]{
+                (byte) 0x82,
+                (byte) 0x81,
+                1, 2, 3, 4,
+                (byte) (0x55 ^ 1)
+        };
+        WsConnection client = new WsConnection(
+                new ByteArrayInputStream(maskedBinary),
+                new ByteArrayOutputStream(),
+                true,
+                1024);
+
+        assertThrows(IOException.class, client::recv);
+    }
+
+    /** 分片消息的累计大小必须受 maxMessageBytes 限制，而不只是限制每个单帧。 */
+    @Test
+    void fragmentedMessageTotalSizeIsLimited() {
+        ByteArrayOutputStream wire = new ByteArrayOutputStream();
+
+        // 服务端发往客户端，不加掩码：首个 binary 分片 4 字节，续帧再 4 字节，总计超过上限 6。
+        wire.write(0x02);
+        wire.write(0x04);
+        wire.writeBytes(new byte[]{1, 2, 3, 4});
+        wire.write(0x80);
+        wire.write(0x04);
+        wire.writeBytes(new byte[]{5, 6, 7, 8});
+
+        WsConnection client = new WsConnection(
+                new ByteArrayInputStream(wire.toByteArray()),
+                new ByteArrayOutputStream(),
+                true,
+                6);
+
+        assertThrows(IOException.class, client::recv);
+    }
+
+    /** 非最短长度编码必须拒绝，避免协议歧义。 */
+    @Test
+    void rejectsNonMinimalExtendedLengthEncoding() {
+        byte[] malformed = new byte[]{
+                (byte) 0x82,
+                126,
+                0,
+                1,
+                0x55
+        };
+        WsConnection client = new WsConnection(
+                new ByteArrayInputStream(malformed),
+                new ByteArrayOutputStream(),
+                true,
+                1024);
+
+        assertThrows(IOException.class, client::recv);
     }
 
     /** 端到端穿越真实回环 socket + 完整握手（服务端 accept + 客户端 upgrade）。 */
     @Test
     void handshakeOverLoopbackSocket() throws Exception {
-        try (java.net.ServerSocket ss = new java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress())) {
-            int port = ss.getLocalPort();
+        try (java.net.ServerSocket serverSocket = new java.net.ServerSocket(
+                0, 1, java.net.InetAddress.getLoopbackAddress())) {
+            int port = serverSocket.getLocalPort();
             ArrayBlockingQueue<byte[]> received = new ArrayBlockingQueue<>(1);
 
             Thread serverThread = new Thread(() -> {
-                try (java.net.Socket s = ss.accept()) {
-                    var hdrs = WsHandshake.readRequest(s.getInputStream());
-                    WsHandshake.writeAcceptResponse(s.getOutputStream(), hdrs.get("sec-websocket-key"));
-                    WsConnection conn = new WsConnection(s.getInputStream(), s.getOutputStream(), false, 1 << 20);
-                    received.offer(conn.recv());
+                try (java.net.Socket socket = serverSocket.accept()) {
+                    var headers = WsHandshake.readRequest(socket.getInputStream());
+                    WsHandshake.writeAcceptResponse(
+                            socket.getOutputStream(), headers.get("sec-websocket-key"));
+                    WsConnection connection = new WsConnection(
+                            socket.getInputStream(), socket.getOutputStream(), false, 1 << 20);
+                    received.offer(connection.recv());
                 } catch (Exception ignored) {
                 }
             });
             serverThread.start();
 
-            try (java.net.Socket s = new java.net.Socket(java.net.InetAddress.getLoopbackAddress(), port)) {
-                String key = WsHandshake.writeRequest(s.getOutputStream(), "localhost", port, "/windui");
-                WsHandshake.readResponse(s.getInputStream(), key);
-                WsConnection conn = new WsConnection(s.getInputStream(), s.getOutputStream(), true, 1 << 20);
-                conn.send("hello-loopback".getBytes(StandardCharsets.UTF_8));
+            try (java.net.Socket socket = new java.net.Socket(
+                    java.net.InetAddress.getLoopbackAddress(), port)) {
+                String key = WsHandshake.writeRequest(
+                        socket.getOutputStream(), "localhost", port, "/windui");
+                WsHandshake.readResponse(socket.getInputStream(), key);
+                WsConnection connection = new WsConnection(
+                        socket.getInputStream(), socket.getOutputStream(), true, 1 << 20);
+                connection.send("hello-loopback".getBytes(StandardCharsets.UTF_8));
+
                 byte[] got = received.poll(3, java.util.concurrent.TimeUnit.SECONDS);
                 assertArrayEquals("hello-loopback".getBytes(StandardCharsets.UTF_8), got);
             }
+
+            serverThread.join(3000);
         }
     }
 }
