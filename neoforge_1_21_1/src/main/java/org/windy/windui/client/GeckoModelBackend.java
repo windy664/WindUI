@@ -25,14 +25,23 @@ import software.bernie.geckolib.util.GeckoLibUtil;
  * 仅当 {@code ModList.isLoaded("geckolib")} 为真时才被 {@link ModelRendererImpl} 主动 class-load，
  * 故 GeckoLib 缺席时本类永不加载、不会 {@code NoClassDefFoundError}。<b>不打包 GeckoLib、无反射</b>。
  * <p>
- * ⚠️ <b>渲染行为只能真机验</b>：MinecraftSurfaceView 表面 + GeckoLib GUI-3D 渲染（Lighting/PoseStack/buffer）
- * 这套 MC 渲染内部只做了编译校验，定位/缩放/打光多半需真机微调（本类把 scale/spin 做成可调 props）。
+ * 渲染行为仍需真机验证：MinecraftSurfaceView 表面、GeckoLib GUI 3D 渲染、Lighting、PoseStack 和
+ * buffer 的组合只能在真实客户端环境确认。
  * <p>
- * Model3D 节点字段（type="geckolib"）：{@code geo}（模型资源，如 "ns:geo/xxx.geo.json"）、
- * {@code texture}（贴图，如 "ns:textures/xxx.png"）、{@code animFile}（动画文件，可选）、
- * {@code animation}（循环动画名，可选）、{@code scale}（缩放，默认 24）、{@code spin}（是否自转，默认 true）。
+ * Model3D 节点字段（type="geckolib"）：
+ * <ul>
+ *     <li>{@code geo}：模型资源，如 {@code ns:geo/xxx.geo.json}</li>
+ *     <li>{@code texture}：贴图资源，如 {@code ns:textures/xxx.png}</li>
+ *     <li>{@code animFile}：动画文件，可选</li>
+ *     <li>{@code animation}：循环动画名，可选</li>
+ *     <li>{@code modelScale}：Surface 内的模型缩放，默认 24</li>
+ *     <li>{@code spin}：是否自转，默认 true</li>
+ * </ul>
+ * 通用 {@code scale} 由共享 ViewFactory 作为 View 变换处理，不再同时用于模型矩阵。
  */
 final class GeckoModelBackend {
+
+    private static final float DEFAULT_MODEL_SCALE = 24f;
 
     private GeckoModelBackend() {
     }
@@ -41,21 +50,48 @@ final class GeckoModelBackend {
     static View create(Context ctx, WidgetNode node) {
         String geo = node.getString("geo", null);
         String texture = node.getString("texture", null);
-        if (geo == null || texture == null) return null; // GeckoLib 后端必须给 geo + texture
+        if (geo == null || texture == null) {
+            return null;
+        }
+
         ResourceLocation geoRl = ResourceLocation.tryParse(geo);
         ResourceLocation texRl = ResourceLocation.tryParse(texture);
-        if (geoRl == null || texRl == null) return null;
+        if (geoRl == null || texRl == null) {
+            return null;
+        }
+
         String animFile = node.getString("animFile", null);
-        ResourceLocation animRl = animFile == null ? null : ResourceLocation.tryParse(animFile);
+        ResourceLocation animRl =
+                animFile == null || animFile.isBlank()
+                        ? null
+                        : ResourceLocation.tryParse(animFile);
+        if (animFile != null && !animFile.isBlank() && animRl == null) {
+            return null;
+        }
 
         WindUiGeoObject object = new WindUiGeoObject(node.getString("animation", null));
         WindUiGeoModel model = new WindUiGeoModel(geoRl, texRl, animRl);
         GeoObjectRenderer<WindUiGeoObject> renderer = new GeoObjectRenderer<>(model);
 
+        float modelScale = modelScale(node);
+        boolean spin = node.getBool("spin", true);
+
         var surface = new MinecraftSurfaceView(ctx);
-        surface.setRenderer(new GeckoSurfaceRenderer(
-                renderer, object, node.getFloat("scale", 24f), node.getBool("spin", true)));
+        surface.setRenderer(new GeckoSurfaceRenderer(renderer, object, modelScale, spin));
         return surface;
+    }
+
+    /**
+     * 新契约读取 modelScale。旧节点只有 scale 时，让共享 ViewFactory 独自处理该 View 缩放，
+     * GeckoLib 内部保持 1，避免历史上的双重缩放。
+     */
+    private static float modelScale(WidgetNode node) {
+        if (!node.props().containsKey("modelScale")) {
+            return node.props().containsKey("scale") ? 1f : DEFAULT_MODEL_SCALE;
+        }
+
+        float value = node.getFloat("modelScale", DEFAULT_MODEL_SCALE);
+        return Float.isFinite(value) && value > 0f ? value : DEFAULT_MODEL_SCALE;
     }
 
     /** 最小 {@link GeoAnimatable}：一个循环动画的独立对象（无世界，tick 用系统时间推进）。 */
@@ -70,9 +106,14 @@ final class GeckoModelBackend {
 
         @Override
         public void registerControllers(AnimatableManager.ControllerRegistrar reg) {
-            if (animation == null || animation.isEmpty()) return;
-            reg.add(new AnimationController<>(this, "main", state ->
-                    state.setAndContinue(RawAnimation.begin().thenLoop(animation))));
+            if (animation == null || animation.isBlank()) {
+                return;
+            }
+            reg.add(new AnimationController<>(
+                    this,
+                    "main",
+                    state -> state.setAndContinue(
+                            RawAnimation.begin().thenLoop(animation))));
         }
 
         @Override
@@ -81,8 +122,8 @@ final class GeckoModelBackend {
         }
 
         @Override
-        public double getTick(Object o) {
-            return (System.currentTimeMillis() - start) / 50.0; // 20 tps
+        public double getTick(Object object) {
+            return (System.currentTimeMillis() - start) / 50.0;
         }
     }
 
@@ -90,54 +131,81 @@ final class GeckoModelBackend {
     private static final class WindUiGeoModel extends GeoModel<WindUiGeoObject> {
         private final ResourceLocation geo;
         private final ResourceLocation texture;
-        private final ResourceLocation anim;
+        private final ResourceLocation animation;
 
-        WindUiGeoModel(ResourceLocation geo, ResourceLocation texture, ResourceLocation anim) {
+        WindUiGeoModel(
+                ResourceLocation geo,
+                ResourceLocation texture,
+                ResourceLocation animation) {
             this.geo = geo;
             this.texture = texture;
-            this.anim = anim;
+            this.animation = animation;
         }
 
         @Override
-        public ResourceLocation getModelResource(WindUiGeoObject a) {
+        public ResourceLocation getModelResource(WindUiGeoObject animatable) {
             return geo;
         }
 
         @Override
-        public ResourceLocation getTextureResource(WindUiGeoObject a) {
+        public ResourceLocation getTextureResource(WindUiGeoObject animatable) {
             return texture;
         }
 
         @Override
-        public ResourceLocation getAnimationResource(WindUiGeoObject a) {
-            return anim;
+        public ResourceLocation getAnimationResource(WindUiGeoObject animatable) {
+            return animation;
         }
     }
 
-    /** 在 MinecraftSurfaceView 里做 GUI-3D 渲染（仿 InventoryScreen 的实体渲染变换）。 */
-    private record GeckoSurfaceRenderer(GeoObjectRenderer<WindUiGeoObject> renderer,
-                                        WindUiGeoObject object, float scale, boolean spin)
-            implements MinecraftSurfaceView.Renderer {
+    /** 在 MinecraftSurfaceView 中执行 GUI 3D 渲染。 */
+    private record GeckoSurfaceRenderer(
+            GeoObjectRenderer<WindUiGeoObject> renderer,
+            WindUiGeoObject object,
+            float modelScale,
+            boolean spin) implements MinecraftSurfaceView.Renderer {
+
         @Override
         public void onSurfaceChanged(int width, int height) {
         }
 
         @Override
-        public void onDraw(GuiGraphics gg, int width, int height, float partialTick, double mouseX, float alpha) {
+        public void onDraw(
+                GuiGraphics gg,
+                int width,
+                int height,
+                float partialTick,
+                double mouseX,
+                float alpha) {
             PoseStack pose = gg.pose();
             pose.pushPose();
-            pose.translate(width / 2.0, height * 0.85, 100.0); // 面板中下部，z 拉深度
-            pose.scale(scale, -scale, scale);                  // Y 取负：GUI y-down vs 模型 y-up
-            if (spin) {
-                float angle = (System.currentTimeMillis() % 3600L) / 10f; // 每 3.6s 一圈
-                pose.mulPose(Axis.YP.rotationDegrees(angle));
+            try {
+                pose.translate(width / 2.0, height * 0.85, 100.0);
+                pose.scale(modelScale, -modelScale, modelScale);
+
+                if (spin) {
+                    float angle = (System.currentTimeMillis() % 3600L) / 10f;
+                    pose.mulPose(Axis.YP.rotationDegrees(angle));
+                }
+
+                MultiBufferSource.BufferSource buffer = gg.bufferSource();
+                Lighting.setupForEntityInInventory();
+                try {
+                    renderer.render(
+                            pose,
+                            object,
+                            buffer,
+                            null,
+                            null,
+                            LightTexture.FULL_BRIGHT,
+                            partialTick);
+                    buffer.endBatch();
+                } finally {
+                    Lighting.setupFor3DItems();
+                }
+            } finally {
+                pose.popPose();
             }
-            MultiBufferSource.BufferSource buffer = gg.bufferSource();
-            Lighting.setupForEntityInInventory();
-            renderer.render(pose, object, buffer, null, null, LightTexture.FULL_BRIGHT, partialTick);
-            buffer.endBatch();
-            Lighting.setupFor3DItems();
-            pose.popPose();
         }
     }
 }

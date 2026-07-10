@@ -2,104 +2,185 @@
  * WindUI SDUI 协议定义 — 喂给 AI 的唯一契约。
  *
  * AI 只需生成一段 JSON：布局树 + 内嵌动作定义。
- * 无需 JS 引擎，所有逻辑通过结构化 JSON Action 表达。
+ * 无需客户端 JS 引擎，所有逻辑通过结构化 JSON Action 表达。
  */
 
 // ===== 布局协议 =====
 
 type ComponentType =
   | "LinearLayout"   // 线性布局（垂直/水平）
+  | "FrameLayout"    // 叠层/绝对定位容器
+  | "ScrollView"     // 竖向滚动容器
   | "TextView"       // 文本
+  | "Markdown"       // Markdown 富文本
   | "Button"         // 按钮
-  | "ImageView"      // 图片（从 MC 资源加载纹理）
-  | "Model3D";       // 3D 模型/实体（MinecraftSurfaceView 承载；后端 item/entity/geckolib）
+  | "ImageView"      // 图片（MC 资源或服务端 asset）
+  | "ItemSlot"       // 图标、数量角标和 tooltip 组成的物品格
+  | "TextBox"        // 输入框
+  | "Slider"         // 滑块
+  | "Bar"            // 进度条
+  | "Divider"        // 分隔线
+  | "Model3D";       // 3D 模型/实体（MinecraftSurfaceView）
 
-// Model3D props（3D 模型/实体）：
-//   type:      后端。"item"(默认，vanilla 物品) / "entity"(vanilla 实体，待做) / "geckolib"(GeckoLib 模型，软依赖)
-//   width/height: 面板尺寸（必填，SurfaceView 无内容尺寸）
-//   scale:     渲染缩放（可选）
-//   —— item 后端：model = 物品 id（如 "minecraft:diamond"）
-//   —— geckolib 后端：geo = 模型资源（"ns:geo/xxx.geo.json"）、texture = 贴图（"ns:textures/xxx.png"）、
-//      animFile = 动画文件（可选）、animation = 循环动画名（可选）、spin = 是否自转（默认 true）
-// 客户端无对应后端/GeckoLib 未装/资源缺失时该节点跳过（优雅降级）。
-// JS：ui.model(itemId, props) 或 ui.geckoModel(geo, texture, props)。
+// Model3D props：
+//   type: 后端。"item"(默认) / "entity"(待做) / "geckolib"(1.21.1 软依赖)
+//   width/height: SurfaceView 面板尺寸，建议显式填写
+//   modelScale: Surface 内 3D 内容缩放。新界面必须用该属性控制模型大小
+//   scale: 通用 ModernUI View 缩放，会缩放整个 View；不要用它代替 modelScale
+//
+// item 后端：
+//   model: 物品 id，如 "minecraft:diamond"
+//
+// geckolib 后端：
+//   geo: 模型资源，如 "ns:geo/xxx.geo.json"
+//   texture: 贴图资源，如 "ns:textures/xxx.png"
+//   animFile: 动画文件，可选
+//   animation: 循环动画名，可选
+//   spin: 是否自转，默认 true
+//
+// 客户端无对应后端、GeckoLib 未安装或资源非法时，该节点会被跳过。
+// JS helper：ui.model(itemId, props) / ui.geckoModel(geo, texture, props)。
 
 // ===== 动作定义 =====
 
 type Action =
-  | { action: "executeCommand"; args: [string] }        // 执行客户端命令
-  | { action: "showToast"; args: [string] }              // 显示提示
-  | { action: "closeScreen" }                            // 关闭界面
-  | { action: "callback"; id: string; data?: string[] }  // 回调服务端事件（买卖/翻页等由服务端处理）
-  | { action: "chain"; actions: Action[] }               // 串联多个动作
+  | { action: "executeCommand"; args: [string] }
+  | { action: "showToast"; args: [string] }
+  | { action: "closeScreen" }
+  | { action: "playSound"; args: [string, string?, string?] }
+  | {
+      action: "callback";
+      id: string;
+      data?: string[];
+      readback?: string[];
+    }
+  | { action: "chain"; actions: Action[] };
 
 interface UIElement {
   /** 组件类型 */
   type: ComponentType;
-  /** 可选控件标识（用于后续定向刷新/引用；当前渲染不依赖它） */
+
+  /** 可选控件标识，用于 patch 和输入回读 */
   id?: string;
+
   /** 组件属性 */
   props?: Record<string, any>;
-  /** 子组件（仅容器类组件支持） */
+
+  /** 子组件，仅容器类组件支持 */
   children?: UIElement[];
-  /** 左键点击时执行的动作（单个或数组） */
+
+  /** 左键点击 */
   onClick?: Action | Action[];
-  /** 右键（上下文）点击 —— 常用于「左键买 / 右键看详情」 */
+
+  /** 右键/上下文点击 */
   onRightClick?: Action | Action[];
+
   /** 中键点击 */
   onMiddleClick?: Action | Action[];
-  /** 鼠标滚轮（按刻度触发）—— 翻页 / 调数量 */
+
+  /** 鼠标滚轮 */
   onScroll?: Action | Action[];
-  /** 鼠标松开（抬起） */
+
+  /** 鼠标松开 */
   onRelease?: Action | Action[];
-  /** 鼠标移入组件 —— 做高亮 / 动态提示 / 预览 */
+
+  /** 鼠标移入 */
   onHoverEnter?: Action | Action[];
-  /** 鼠标移出组件 */
+
+  /** 鼠标移出 */
   onHoverLeave?: Action | Action[];
-  /** 输入框(TextBox)文本变更（带 ~300ms 防抖）—— 做实时搜索/校验；
-   *  配合动作里的 readback 把当前文本带回服务端：{ action:"callback", id:"search", readback:["输入框id"] } */
+
+  /** TextBox 文本变更，约 300ms 防抖 */
   onTextChange?: Action | Action[];
-  /** 滑块(Slider)值变更 —— 仅在松手时触发一次；配合 readback 取最终值：
-   *  { action:"callback", id:"setvol", readback:["滑块id"] } */
+
+  /** Slider 松手时触发 */
   onChange?: Action | Action[];
 }
 
-// 通用 props（补充）:
-//   tip: string           鼠标悬停提示（任意组件）
-
-// Slider props（滑块，SeekBar）:
-//   value: number  初值（0~max）
-//   max: number    上限（默认 100）
-//   width: number  宽度 dp（默认 140）
-//   id: string     供 readback 读回当前进度（onChange 松手时带回）
+// ===== 通用 props =====
+//
+// padding: number
+// margin: number
+// width / height: number | "match" | "wrap"
+// background: string
+// gradient: string[]
+// gradientDir: "tb" | "lr" | "tlbr" | "brtl"
+// radius: number
+// border: string
+// borderWidth: number
+// alpha: number
+// scale: number
+// visible: boolean
+// enable: boolean
+// tip: string
 
 // ===== 组件属性参考 =====
-
-// 通用 props（所有组件）:
-//   padding: number (dp)
-//   width / height: number(dp) | "match"(填满父容器) | "wrap"(自适应，默认)
-//   alpha: number(0~1 透明度)  scale: number(缩放,1=原始)  tip: string(悬停提示)
-//   visible: boolean  enable: boolean
-// 组件复用/继承：用 JS 函数(定义一个返回节点的函数,传参调用)即可,比 DragonCore 的 extends 更灵活。
-
-// LinearLayout props:
-//   orientation: 0=水平, 1=垂直 (默认 1)
+//
+// LinearLayout:
+//   orientation: 0 | 1
 //   gravity: "center" | "start" | "end"
-
-// TextView props:
+//
+// FrameLayout 子节点:
+//   x: number
+//   y: number
+//   gravity: "center" | "end" | "bottom"
+//
+// TextView / Markdown:
 //   text: string
-//   textSize: number (sp)
-//   textColor: string (如 "#FFD700")
-
-// Button props:
-//   text: string
-//   textSize: number (sp)
+//   textSize: number
 //   textColor: string
-
-// ImageView props:
-//   src: string  资源标识 "namespace:path"，如 "minecraft:textures/item/diamond.png"
-//   scaleType: "fitCenter"(默认) | "fitXY" | "center" | "centerCrop" | "centerInside" | "fitStart" | "fitEnd"
-//   （通常配合 width/height 使用，因物品贴图仅 16×16）
+//
+// Button:
+//   text: string
+//   textSize: number
+//   textColor: string
+//
+// ImageView:
+//   src: string
+//   scaleType:
+//     "fitCenter" | "fitXY" | "center" | "centerCrop" |
+//     "centerInside" | "fitStart" | "fitEnd"
+//
+// ItemSlot:
+//   icon: string
+//   count: number
+//   name: string
+//   lore: string[]
+//   size: number
+//
+// TextBox:
+//   text: string
+//   hint: string
+//   textSize: number
+//   textColor: string
+//
+// Slider:
+//   value: number
+//   max: number
+//   width: number
+//
+// Bar:
+//   value: number
+//   width: number
+//   height: number
+//   radius: number
+//   color: string
+//   track: string
+//
+// Divider:
+//   width: number | "match"
+//   height: number
+//   color: string
+//
+// Model3D:
+//   type: "item" | "entity" | "geckolib"
+//   model: string
+//   modelScale: number
+//   geo: string
+//   texture: string
+//   animFile: string
+//   animation: string
+//   spin: boolean
 
 // ===== 示例 =====
 //
@@ -110,4 +191,15 @@ interface UIElement {
 //     { "action": "executeCommand", "args": ["/spawn"] },
 //     { "action": "showToast", "args": ["正在传送..."] }
 //   ]
+// }
+//
+// {
+//   "type": "Model3D",
+//   "props": {
+//     "type": "item",
+//     "model": "minecraft:diamond_block",
+//     "width": 72,
+//     "height": 72,
+//     "modelScale": 4
+//   }
 // }

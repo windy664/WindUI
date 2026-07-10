@@ -10,14 +10,13 @@ function render(ctx) {
 
       ui.divider({}),
       ui.text("3D 模型（表面证明：vanilla 物品后端）", { textSize: 12, textColor: "#7E8CA0", margin: 2 }),
-      // Model3D：MinecraftSurfaceView 承载 MC 渲染。本轮 item 后端画一个放大的物品；
-      // 表面证通后 type 可换 entity/geckolib。客户端无渲染器则此节点自动跳过（优雅降级）。
-      ui.model("minecraft:diamond_block", { width: 72, height: 72, scale: 4 }),
+      // modelScale 只控制 Surface 内的 3D 内容大小；通用 scale 仍表示整个 ModernUI View 的变换。
+      // 客户端无对应渲染器时该节点自动跳过（优雅降级）。
+      ui.model("minecraft:diamond_block", { width: 72, height: 72, modelScale: 4 }),
       ui.divider({}),
       ui.text("进度条 70%", { textSize: 12, textColor: "#7E8CA0", margin: 2 }),
       ui.bar(0.7, { width: 200, height: 8, color: "#66E0A3" }),
       ui.divider({}),
-
 
       ui.row({ gravity: "center", padding: 8 }, [
         ui.slot("minecraft:textures/item/diamond.png", { count: 64, name: "钻石", lore: ["珍贵的矿物"], size: 34 }, { action: "callback", id: "pick", data: ["diamond"] }),
