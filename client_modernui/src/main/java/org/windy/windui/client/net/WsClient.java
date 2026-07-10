@@ -2,6 +2,7 @@ package org.windy.windui.client.net;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.windy.windui.client.hud.HudState;
 import org.windy.windui.core.protocol.ControlCodec;
 import org.windy.windui.core.protocol.EventCodec;
 import org.windy.windui.core.protocol.WindUIProtocol;
@@ -90,8 +91,9 @@ public final class WsClient {
 
         final long myGeneration;
         final Thread newThread;
+        final Detached previous;
         synchronized (LOCK) {
-            invalidateCurrentLocked();
+            previous = detachCurrentLocked();
             myGeneration = generation;
             newThread = new Thread(
                     () -> run(myGeneration, host, port, token, cb),
@@ -99,6 +101,10 @@ public final class WsClient {
             newThread.setDaemon(true);
             thread = newThread;
         }
+
+        // 网络关闭可能阻塞，必须在全局状态锁外执行，避免卡住新连接登记和事件发送。
+        stopDetached(previous);
+        clearSessionState();
         newThread.start();
     }
 
@@ -123,32 +129,47 @@ public final class WsClient {
         return current != null && !current.isClosed();
     }
 
-    /** 断开连接（登出/切服时调）。 */
+    /** 断开连接（登出/切服时调），并清理当前服务端所属的会话级客户端状态。 */
     public static void disconnect() {
+        final Detached detached;
         synchronized (LOCK) {
-            invalidateCurrentLocked();
+            detached = detachCurrentLocked();
         }
+        stopDetached(detached);
+        clearSessionState();
     }
 
     // ===== 内部 =====
 
     /**
-     * 使当前代次和连接失效。调用者必须持有 {@link #LOCK}。
+     * 使当前代次和连接失效，并把待关闭对象从共享状态中摘除。调用者必须持有 {@link #LOCK}。
      * generation 先递增，确保正在阻塞 connect/handshake 的旧线程恢复后无法重新登记。
+     * 网络关闭由调用者在锁外执行。
      */
-    private static void invalidateCurrentLocked() {
+    private static Detached detachCurrentLocked() {
         generation++;
 
         WsConnection current = conn;
+        Thread currentThread = thread;
         conn = null;
-        if (current != null) {
-            current.close();
+        thread = null;
+        return new Detached(current, currentThread);
+    }
+
+    /** 在全局状态锁外停止被替换的连接和线程。 */
+    private static void stopDetached(Detached detached) {
+        if (detached == null) {
+            return;
         }
 
-        Thread currentThread = thread;
-        thread = null;
-        if (currentThread != null && currentThread != Thread.currentThread()) {
-            currentThread.interrupt();
+        Thread oldThread = detached.thread();
+        if (oldThread != null && oldThread != Thread.currentThread()) {
+            oldThread.interrupt();
+        }
+
+        WsConnection oldConnection = detached.connection();
+        if (oldConnection != null) {
+            oldConnection.close();
         }
     }
 
@@ -212,16 +233,24 @@ public final class WsClient {
             if (created != null) {
                 created.close();
             }
+
+            boolean endedCurrentSession = false;
             synchronized (LOCK) {
                 // 只能清理自己登记的连接，绝不能把后续代次的新连接置空。
                 if (generation == myGeneration) {
                     if (registered && conn == created) {
                         conn = null;
+                        endedCurrentSession = true;
                     }
                     if (thread == Thread.currentThread()) {
                         thread = null;
                     }
                 }
+            }
+
+            // 当前权威连接自然断开时清掉会话级 HUD；旧代次线程退出不得影响新会话。
+            if (endedCurrentSession) {
+                clearSessionState();
             }
         }
     }
@@ -241,20 +270,20 @@ public final class WsClient {
     }
 
     private static void removeIfCurrent(WsConnection failed) {
+        final Detached detached;
         synchronized (LOCK) {
             if (conn != failed) {
                 return;
             }
-            generation++;
-            conn = null;
-            failed.close();
-
-            Thread currentThread = thread;
-            thread = null;
-            if (currentThread != null && currentThread != Thread.currentThread()) {
-                currentThread.interrupt();
-            }
+            detached = detachCurrentLocked();
         }
+        stopDetached(detached);
+        clearSessionState();
+    }
+
+    /** 清理仅属于当前服务器连接的客户端状态；内容哈希图片缓存允许跨会话复用，暂不在此清空。 */
+    private static void clearSessionState() {
+        HudState.clear();
     }
 
     private static void dispatch(byte[] msg, Callbacks cb) {
@@ -308,5 +337,9 @@ public final class WsClient {
         out[0] = channel;
         System.arraycopy(data, 0, out, 1, data.length);
         return out;
+    }
+
+    /** 从共享状态摘下、等待在锁外停止的一组连接资源。 */
+    private record Detached(WsConnection connection, Thread thread) {
     }
 }
