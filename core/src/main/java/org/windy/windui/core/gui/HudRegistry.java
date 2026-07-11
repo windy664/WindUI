@@ -14,17 +14,21 @@ import java.util.TreeSet;
 import java.util.stream.Stream;
 
 /**
- * 文件驱动的 HUD 注册表，与 {@link GuiRegistry} 使用相同的覆盖策略。
+ * 文件驱动的 HUD 注册表，与 {@link GuiRegistry} 使用相同的示例释放策略。
  * <p>
- * 内置默认 HUD 位于 {@code /windui/huds/<id>.json}。加载时先把内置默认资源读入内存，再用磁盘目录
- * {@code huds/*.json} 中的同名文件覆盖。默认资源不会写入磁盘；服主需要修改时，可从 JAR 中复制一份
- * 到磁盘目录。删除磁盘覆盖文件并重载后，会恢复使用 JAR 内置版本。
+ * 内置默认 HUD 是打进 JAR 的示例模板，位于 {@code /windui/huds/<id>.json}。
+ * 加载时会把磁盘目录中缺失的内置示例释放到 {@code huds/}，供服主直接查看和修改；
+ * 已存在的磁盘文件绝不覆盖，用户改动会完整保留。
  * <p>
- * {@code /windui hud <id>} 按 id 获取 HUD，文件名去扩展名即 id。
+ * 随后从磁盘 {@code huds/*.json} 全量加载。删除某个内置示例后，下一次加载会重新释放该示例。
+ * {@code /windui hud <id>} 按文件名去扩展名后的 id 获取 HUD。
  */
 public final class HudRegistry {
 
+    /** 内置默认 HUD 的 classpath 目录。 */
     private static final String BUNDLED_DIR = "/windui/huds/";
+
+    /** 随 JAR 提供、会在磁盘缺失时释放的示例 HUD id。 */
     private static final List<String> DEFAULT_IDS = List.of("demo");
 
     private final Path hudsDir;
@@ -35,17 +39,22 @@ public final class HudRegistry {
     }
 
     /**
-     * 载入 HUD：先从 JAR 读取内置默认资源，再从磁盘 {@code huds/*.json} 全量加载并覆盖同名默认。
-     * 不会向磁盘写入任何默认文件。
+     * 载入 HUD：
+     * <ol>
+     *     <li>创建磁盘 {@code huds/} 目录；</li>
+     *     <li>把缺失的 JAR 内置示例释放到磁盘，已存在文件不覆盖；</li>
+     *     <li>从磁盘 {@code huds/*.json} 全量加载。</li>
+     * </ol>
      *
      * @return 加载到的 HUD 数量
      */
     public synchronized int load() {
         huds.clear();
-        loadBundledDefaults();
 
         try {
             Files.createDirectories(hudsDir);
+            extractMissingDefaults();
+
             try (Stream<Path> stream = Files.list(hudsDir)) {
                 List<Path> files = stream
                         .filter(Files::isRegularFile)
@@ -71,12 +80,20 @@ public final class HudRegistry {
         return huds.size();
     }
 
-    /** 把所有可用的 JAR 内置默认 HUD 载入内存。 */
-    private void loadBundledDefaults() {
+    /**
+     * 把磁盘上缺失的内置示例释放出来。
+     * 已存在的文件绝不覆盖，确保服主修改不会在 reload 或升级后丢失。
+     */
+    private void extractMissingDefaults() throws IOException {
         for (String id : DEFAULT_IDS) {
+            Path target = hudsDir.resolve(id + ".json");
+            if (Files.exists(target)) {
+                continue;
+            }
+
             String json = readBundled(id);
             if (json != null && !json.isBlank()) {
-                huds.put(id, json);
+                Files.writeString(target, json, StandardCharsets.UTF_8);
             }
         }
     }
@@ -91,7 +108,7 @@ public final class HudRegistry {
         return new TreeSet<>(huds.keySet());
     }
 
-    /** HUD 磁盘覆盖目录。 */
+    /** HUD 示例及用户自定义文件所在的磁盘目录。 */
     public Path directory() {
         return hudsDir;
     }

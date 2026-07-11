@@ -16,23 +16,19 @@ import java.util.stream.Stream;
 /**
  * 文件驱动的 GUI 注册表。平台无关（纯 java.nio + Map）。
  * <p>
- * 内置默认界面是打进 JAR 的真实资源文件（{@code /windui/guis/<id>.json}，见
- * {@code core/src/main/resources}）。加载时先把内置默认资源读入内存，再用磁盘目录
- * {@code guis/*.json} 中的同名文件覆盖。默认资源不会写入磁盘，因此：
- * <ul>
- *     <li>开箱即用，无需生成默认文件；</li>
- *     <li>服主可从 JAR 复制默认文件到磁盘后定制；</li>
- *     <li>删除磁盘覆盖文件后，重载会恢复使用内置版本；</li>
- *     <li>升级 JAR 后，未被磁盘覆盖的默认界面自动使用新版本。</li>
- * </ul>
- * 文件名去扩展名即界面 id。支持热重载。
+ * 内置默认界面是打进 JAR 的示例模板，位于 {@code /windui/guis/<id>.json}。
+ * 加载时会把磁盘目录中缺失的内置示例释放到 {@code guis/}，供服主直接查看和修改；
+ * 已存在的磁盘文件绝不覆盖，用户改动会完整保留。
+ * <p>
+ * 随后从磁盘 {@code guis/*.json} 全量加载，文件名去扩展名即界面 id。删除某个内置示例后，
+ * 下一次加载会重新释放该示例。支持热重载。
  */
 public final class GuiRegistry {
 
     /** 内置默认界面的 classpath 目录。 */
     private static final String BUNDLED_DIR = "/windui/guis/";
 
-    /** 随 JAR 内置的默认界面 id。 */
+    /** 随 JAR 提供、会在磁盘缺失时释放的示例界面 id。 */
     private static final List<String> DEFAULT_IDS = List.of(
             "menu_main", "shop_main", "confirm", "welcome");
 
@@ -44,17 +40,22 @@ public final class GuiRegistry {
     }
 
     /**
-     * 载入界面：先从 JAR 读取内置默认资源，再从磁盘 {@code guis/*.json} 全量加载并覆盖同名默认。
-     * 不会向磁盘写入任何默认文件。
+     * 载入界面：
+     * <ol>
+     *     <li>创建磁盘 {@code guis/} 目录；</li>
+     *     <li>把缺失的 JAR 内置示例释放到磁盘，已存在文件不覆盖；</li>
+     *     <li>从磁盘 {@code guis/*.json} 全量加载。</li>
+     * </ol>
      *
      * @return 加载到的界面数量
      */
     public synchronized int load() {
         guis.clear();
-        loadBundledDefaults();
 
         try {
             Files.createDirectories(guisDir);
+            extractMissingDefaults();
+
             try (Stream<Path> stream = Files.list(guisDir)) {
                 List<Path> files = stream
                         .filter(Files::isRegularFile)
@@ -80,12 +81,20 @@ public final class GuiRegistry {
         return guis.size();
     }
 
-    /** 把所有可用的 JAR 内置默认界面载入内存。 */
-    private void loadBundledDefaults() {
+    /**
+     * 把磁盘上缺失的内置示例释放出来。
+     * 已存在的文件绝不覆盖，确保服主修改不会在 reload 或升级后丢失。
+     */
+    private void extractMissingDefaults() throws IOException {
         for (String id : DEFAULT_IDS) {
+            Path target = guisDir.resolve(id + ".json");
+            if (Files.exists(target)) {
+                continue;
+            }
+
             String json = readBundled(id);
             if (json != null && !json.isBlank()) {
-                guis.put(id, json);
+                Files.writeString(target, json, StandardCharsets.UTF_8);
             }
         }
     }
@@ -112,6 +121,7 @@ public final class GuiRegistry {
         return new TreeSet<>(guis.keySet());
     }
 
+    /** GUI 示例及用户自定义文件所在的磁盘目录。 */
     public Path directory() {
         return guisDir;
     }
