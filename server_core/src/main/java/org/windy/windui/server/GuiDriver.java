@@ -63,7 +63,7 @@ public final class GuiDriver {
         return registry;
     }
 
-    /** 文件驱动的 HUD 注册表({@code /windui hud <id>} 按 id 取)。 */
+    /** 文件驱动的 HUD 注册表（{@code /windui hud <id>} 按 id 取）。 */
     public HudRegistry huds() {
         return huds;
     }
@@ -74,9 +74,9 @@ public final class GuiDriver {
     }
 
     /**
-     * 推 HUD 面板给玩家（前向兼容门控:客户端不支持 HUD 则静默忽略）。
+     * 推 HUD 面板给玩家（前向兼容门控：客户端不支持 HUD 则静默忽略）。
      *
-     * @param panelsJson 面板 JSON 数组;空数组 {@code "[]"} = 清空 HUD
+     * @param panelsJson 面板 JSON 数组；空数组 {@code "[]"} = 清空 HUD
      */
     public void hud(UiHost host, String panelsJson) {
         if (!clients.supports(host.id(), ProtocolFeatures.HUD)) {
@@ -89,7 +89,7 @@ public final class GuiDriver {
         return scripts;
     }
 
-    /** 图片仓库（Phase 3 asset 客户端接收半接线后，界面里的 {@code img:} 引用由此解析下发）。 */
+    /** 图片仓库：界面里的 {@code img:} 引用由此解析和下发。 */
     public ImgStore images() {
         return images;
     }
@@ -111,13 +111,18 @@ public final class GuiDriver {
         String kind;
         if (scripts.has(guiId)) {
             json = scripts.render(guiId, host.ctx());
-            if (json == null) return null;
+            if (json == null) {
+                return null;
+            }
             kind = "JS";
         } else {
             json = registry.get(guiId);
-            if (json == null) return null;
+            if (json == null) {
+                return null;
+            }
             kind = "JSON";
         }
+
         json = host.applyPlaceholders(json);
         json = pushAssetsAndRewrite(host, json);
         host.sendUi(json);
@@ -134,22 +139,30 @@ public final class GuiDriver {
         if (images == null || !json.contains("img:")) {
             return json;
         }
-        Set<String> sent = sentAssets.computeIfAbsent(host.id(), k -> ConcurrentHashMap.newKeySet());
-        Matcher m = IMG_REF.matcher(json);
-        StringBuilder sb = new StringBuilder();
-        while (m.find()) {
-            AssetCodec.Asset asset = images.resolve(m.group(1));
+
+        Set<String> sent = sentAssets.computeIfAbsent(
+                host.id(), key -> ConcurrentHashMap.newKeySet());
+        Matcher matcher = IMG_REF.matcher(json);
+        StringBuilder output = new StringBuilder();
+
+        while (matcher.find()) {
+            AssetCodec.Asset asset = images.resolve(matcher.group(1));
             if (asset != null) {
                 if (sent.add(asset.hash())) {
                     host.sendAsset(AssetCodec.encode(asset.hash(), asset.png()));
                 }
-                m.appendReplacement(sb, Matcher.quoteReplacement("asset:" + asset.hash()));
+                matcher.appendReplacement(
+                        output,
+                        Matcher.quoteReplacement("asset:" + asset.hash()));
             } else {
-                m.appendReplacement(sb, Matcher.quoteReplacement(m.group(0))); // 找不到，原样留
+                matcher.appendReplacement(
+                        output,
+                        Matcher.quoteReplacement(matcher.group(0)));
             }
         }
-        m.appendTail(sb);
-        return sb.toString();
+
+        matcher.appendTail(output);
+        return output.toString();
     }
 
     /**
@@ -162,31 +175,36 @@ public final class GuiDriver {
         if (current == null || !scripts.has(current)) {
             return false;
         }
-        // 拆出 readback 值（客户端以 __rb:<id>:<url-base64> 编码追加进 data，避免命令参数含空格）
+
+        // 拆出 readback 值（客户端以 __rb:<id>:<url-base64> 编码追加进 data，避免命令参数含空格）。
         List<String> data = new ArrayList<>();
         Map<String, String> values = new HashMap<>();
-        for (String d : rawData) {
-            if (d.startsWith("__rb:")) {
-                String body = d.substring(5);
+        for (String item : rawData) {
+            if (item.startsWith("__rb:")) {
+                String body = item.substring(5);
                 int colon = body.indexOf(':');
                 if (colon > 0) {
                     try {
                         String value = new String(
-                                Base64.getUrlDecoder().decode(body.substring(colon + 1)), StandardCharsets.UTF_8);
+                                Base64.getUrlDecoder().decode(body.substring(colon + 1)),
+                                StandardCharsets.UTF_8);
                         values.put(body.substring(0, colon), value);
                     } catch (IllegalArgumentException ignored) {
-                        // 非法编码，忽略该项
+                        // 非法编码，忽略该项。
                     }
                 }
             } else {
-                data.add(d);
+                data.add(item);
             }
         }
-        List<Effect> effects = scripts.dispatchEvent(current, host.ctx(), eventId, data, values);
+
+        List<Effect> effects =
+                scripts.dispatchEvent(current, host.ctx(), eventId, data, values);
         if (effects == null) {
             host.sendMessage("§c[WindUI] 脚本事件处理失败: " + current);
             return true;
         }
+
         applyEffects(host, current, effects);
         return true;
     }
@@ -199,57 +217,155 @@ public final class GuiDriver {
     }
 
     /**
-     * 执行脚本 onEvent 产出的效果列表。
+     * 按脚本产出顺序执行 {@code onEvent} 效果。
      * <p>
-     * message 走聊天；rerender/open 直接重推 UI；close/toast/command/sound 攒成一批经控制频道下发；
-     * patch 攒成一批经增量频道下发（按 id 局部改属性，不重推整树）。同类效果各自保持先后顺序。
+     * 为减少网络消息，同一频道上连续出现的效果会合并为一个消息；但一旦遇到其他频道或即时效果，
+     * 会先刷新当前批次，再继续执行。这样既能保留批量发送的收益，也不会改变脚本声明的跨频道顺序。
+     * <p>
+     * 例如：
+     * <pre>
+     * ctx.close();
+     * ctx.open("next");
+     * </pre>
+     * 会先发送 {@code closeScreen} 控制消息，再发送新 UI，而不是把 close 延迟到事件末尾。
+     * <p>
+     * WebSocket 对同一连接上的消息保证顺序。聊天消息与游戏内聊天通道不共享 WebSocket 顺序，
+     * 但本方法仍会在执行聊天或打开界面前先完成待发送批次的写入。
      */
     private void applyEffects(UiHost host, String currentGui, List<Effect> effects) {
-        List<CtrlAction> control = new ArrayList<>();
-        List<String> patches = new ArrayList<>(); // 每项是一段 {id,props} 的 JSON（脚本 JSON.stringify 而来）
-        for (Effect fx : effects) {
-            switch (fx.type()) {
-                // message：发聊天（§ 颜色码由平台解析）
-                case "message" -> {
-                    if (fx.arg() != null) host.sendMessage(fx.arg());
+        PendingEffects pending = new PendingEffects();
+
+        for (Effect effect : effects) {
+            if (effect == null || effect.type() == null) {
+                continue;
+            }
+
+            switch (effect.type()) {
+                case "close" -> {
+                    switchTo(host, currentGui, pending, PendingChannel.CONTROL);
+                    pending.control.add(CtrlAction.of("closeScreen"));
                 }
-                case "rerender" -> open(host, currentGui);
-                case "open" -> {
-                    if (fx.arg() != null) open(host, fx.arg());
-                }
-                // 以下为服务端主动效果 → 控制频道下发结构化客户端动作
-                case "close" -> control.add(CtrlAction.of("closeScreen"));
                 case "toast" -> {
-                    if (fx.arg() != null) control.add(CtrlAction.of("showToast", fx.arg()));
+                    if (effect.arg() != null) {
+                        switchTo(host, currentGui, pending, PendingChannel.CONTROL);
+                        pending.control.add(CtrlAction.of("showToast", effect.arg()));
+                    }
                 }
                 case "command" -> {
-                    if (fx.arg() != null) control.add(CtrlAction.of("executeCommand", fx.arg()));
+                    if (effect.arg() != null) {
+                        switchTo(host, currentGui, pending, PendingChannel.CONTROL);
+                        pending.control.add(CtrlAction.of("executeCommand", effect.arg()));
+                    }
                 }
                 case "sound" -> {
-                    if (fx.arg() != null) control.add(CtrlAction.of("playSound", fx.arg()));
+                    if (effect.arg() != null) {
+                        switchTo(host, currentGui, pending, PendingChannel.CONTROL);
+                        pending.control.add(CtrlAction.of("playSound", effect.arg()));
+                    }
                 }
-                // patch → 增量更新频道
                 case "patch" -> {
-                    if (fx.arg() != null) patches.add(fx.arg());
+                    if (effect.arg() != null) {
+                        switchTo(host, currentGui, pending, PendingChannel.PATCH);
+                        pending.patches.add(effect.arg());
+                    }
                 }
-                // hud → HUD 频道(one-off,内部已门控)
+                case "message" -> {
+                    flushPending(host, currentGui, pending);
+                    if (effect.arg() != null) {
+                        host.sendMessage(effect.arg());
+                    }
+                }
+                case "rerender" -> {
+                    flushPending(host, currentGui, pending);
+                    open(host, currentGui);
+                }
+                case "open" -> {
+                    flushPending(host, currentGui, pending);
+                    if (effect.arg() != null) {
+                        open(host, effect.arg());
+                    }
+                }
                 case "hud" -> {
-                    if (fx.arg() != null) hud(host, fx.arg());
+                    flushPending(host, currentGui, pending);
+                    if (effect.arg() != null) {
+                        hud(host, effect.arg());
+                    }
                 }
-                case "hudClear" -> hud(host, "[]");
-                default -> { /* 未知/暂不支持的效果，忽略 */ }
+                case "hudClear" -> {
+                    flushPending(host, currentGui, pending);
+                    hud(host, "[]");
+                }
+                default -> {
+                    // 未知效果不能跨越并重排已有批次；先刷新，再忽略未知效果。
+                    flushPending(host, currentGui, pending);
+                }
             }
         }
-        if (!control.isEmpty()) {
-            host.sendControl(ControlCodec.encode(control));
+
+        flushPending(host, currentGui, pending);
+    }
+
+    /**
+     * 切换待发送批次的频道。若频道发生变化，先发送上一频道已积累的内容。
+     */
+    private void switchTo(
+            UiHost host,
+            String currentGui,
+            PendingEffects pending,
+            PendingChannel channel) {
+        if (pending.channel != PendingChannel.NONE
+                && pending.channel != channel) {
+            flushPending(host, currentGui, pending);
         }
-        if (!patches.isEmpty()) {
-            // 前向兼容门控：客户端支持增量更新才发 patch，否则退回整树重推（老客户端优雅降级）
-            if (clients.supports(host.id(), ProtocolFeatures.PATCH)) {
-                host.sendPatch(PatchCodec.encode("[" + String.join(",", patches) + "]"));
-            } else {
-                open(host, currentGui);
+        pending.channel = channel;
+    }
+
+    /**
+     * 发送当前连续批次并清空缓冲。
+     * <p>
+     * Patch 对老客户端的整树重推就在 Patch 原本出现的位置执行，因此后续 control/open/HUD 不会越过它。
+     */
+    private void flushPending(
+            UiHost host,
+            String currentGui,
+            PendingEffects pending) {
+        switch (pending.channel) {
+            case CONTROL -> {
+                if (!pending.control.isEmpty()) {
+                    host.sendControl(ControlCodec.encode(pending.control));
+                }
+            }
+            case PATCH -> {
+                if (!pending.patches.isEmpty()) {
+                    if (clients.supports(host.id(), ProtocolFeatures.PATCH)) {
+                        host.sendPatch(PatchCodec.encode(
+                                "[" + String.join(",", pending.patches) + "]"));
+                    } else {
+                        open(host, currentGui);
+                    }
+                }
+            }
+            case NONE -> {
+                // 没有待发送内容。
             }
         }
+
+        pending.control.clear();
+        pending.patches.clear();
+        pending.channel = PendingChannel.NONE;
+    }
+
+    /** 可批量下发的频道类型。 */
+    private enum PendingChannel {
+        NONE,
+        CONTROL,
+        PATCH
+    }
+
+    /** 一次脚本事件执行期间的连续频道批次。 */
+    private static final class PendingEffects {
+        private PendingChannel channel = PendingChannel.NONE;
+        private final List<CtrlAction> control = new ArrayList<>();
+        private final List<String> patches = new ArrayList<>();
     }
 }
