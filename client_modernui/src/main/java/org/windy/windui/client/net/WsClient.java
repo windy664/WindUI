@@ -6,6 +6,7 @@ import org.windy.windui.client.hud.HudState;
 import org.windy.windui.core.protocol.ControlCodec;
 import org.windy.windui.core.protocol.EventCodec;
 import org.windy.windui.core.protocol.WindUIProtocol;
+import org.windy.windui.core.protocol.WireCodecSupport;
 import org.windy.windui.core.ws.WsConnection;
 import org.windy.windui.core.ws.WsHandshake;
 import org.windy.windui.core.ws.WsProtocol;
@@ -26,13 +27,16 @@ import java.util.Objects;
  * {@link WsProtocol} 频道字节分派到平台注入的 {@link Callbacks}。完全不碰 MC 封包管线，杜绝那类断线。
  * <p>
  * {@link Callbacks} 的实现（各 neoforge 模块）负责把回调投递到主线程 + 调 MC/ModernUI；本类保持 MC-free。
+ * 所有文本入站均按严格 UTF-8 解码，畸形文本只丢弃当前消息，不会以替换字符进入 JSON 解析链路。
  */
 public final class WsClient {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger("WindUI");
+    private static final Logger LOGGER =
+            LoggerFactory.getLogger("WindUI");
 
     /** 单条消息上限（覆盖大图 asset），防 OOM。 */
-    private static final int MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
+    private static final int MAX_MESSAGE_BYTES =
+            8 * 1024 * 1024;
 
     /** TCP 建连超时。 */
     private static final int CONNECT_TIMEOUT_MILLIS = 5000;
@@ -77,16 +81,23 @@ public final class WsClient {
      * @param token 会话鉴权 token（引导消息给出）
      * @param cb    入站分派回调
      */
-    public static void connect(String host, int port, String token, Callbacks cb) {
+    public static void connect(
+            String host,
+            int port,
+            String token,
+            Callbacks cb) {
         Objects.requireNonNull(cb, "callbacks");
         if (host == null || host.isBlank()) {
-            throw new IllegalArgumentException("WebSocket host 不能为空");
+            throw new IllegalArgumentException(
+                    "WebSocket host 不能为空");
         }
         if (port < 1 || port > 65535) {
-            throw new IllegalArgumentException("非法 WebSocket 端口: " + port);
+            throw new IllegalArgumentException(
+                    "非法 WebSocket 端口: " + port);
         }
         if (token == null || token.isEmpty()) {
-            throw new IllegalArgumentException("WebSocket token 不能为空");
+            throw new IllegalArgumentException(
+                    "WebSocket token 不能为空");
         }
 
         final long myGeneration;
@@ -96,7 +107,12 @@ public final class WsClient {
             previous = detachCurrentLocked();
             myGeneration = generation;
             newThread = new Thread(
-                    () -> run(myGeneration, host, port, token, cb),
+                    () -> run(
+                            myGeneration,
+                            host,
+                            port,
+                            token,
+                            cb),
                     "windui-ws-client-" + myGeneration);
             newThread.setDaemon(true);
             thread = newThread;
@@ -109,16 +125,22 @@ public final class WsClient {
     }
 
     /** 发一次事件回程（按钮回调/输入回读）；已连接且发送成功返 true，否则 false（调用方走命令兜底）。 */
-    public static boolean sendEvent(String eventId, List<String> data) {
+    public static boolean sendEvent(
+            String eventId,
+            List<String> data) {
         WsConnection current = conn;
         if (current == null) {
             return false;
         }
         try {
-            current.send(prepend(WsProtocol.EVENT, EventCodec.encode(eventId, data)));
+            current.send(prepend(
+                    WsProtocol.EVENT,
+                    EventCodec.encode(eventId, data)));
             return true;
         } catch (IOException | RuntimeException e) {
-            LOGGER.warn("[WindUI] WebSocket 事件发送失败，改走命令兜底: {}", e.getMessage());
+            LOGGER.warn(
+                    "[WindUI] WebSocket 事件发送失败，改走命令兜底: {}",
+                    e.getMessage());
             removeIfCurrent(current);
             return false;
         }
@@ -163,7 +185,8 @@ public final class WsClient {
         }
 
         Thread oldThread = detached.thread();
-        if (oldThread != null && oldThread != Thread.currentThread()) {
+        if (oldThread != null
+                && oldThread != Thread.currentThread()) {
             oldThread.interrupt();
         }
 
@@ -173,7 +196,12 @@ public final class WsClient {
         }
     }
 
-    private static void run(long myGeneration, String host, int port, String token, Callbacks cb) {
+    private static void run(
+            long myGeneration,
+            String host,
+            int port,
+            String token,
+            Callbacks cb) {
         if (!isCurrentGeneration(myGeneration)) {
             return;
         }
@@ -181,7 +209,9 @@ public final class WsClient {
         WsConnection created = null;
         boolean registered = false;
         try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress(host, port), CONNECT_TIMEOUT_MILLIS);
+            socket.connect(
+                    new InetSocketAddress(host, port),
+                    CONNECT_TIMEOUT_MILLIS);
             socket.setTcpNoDelay(true);
             socket.setSoTimeout(HANDSHAKE_TIMEOUT_MILLIS);
 
@@ -192,17 +222,28 @@ public final class WsClient {
             var in = socket.getInputStream();
             var out = socket.getOutputStream();
 
-            String key = WsHandshake.writeRequest(out, host, port, "/windui");
+            String key = WsHandshake.writeRequest(
+                    out,
+                    host,
+                    port,
+                    "/windui");
             WsHandshake.readResponse(in, key);
 
-            created = new WsConnection(in, out, true, MAX_MESSAGE_BYTES);
+            created = new WsConnection(
+                    in,
+                    out,
+                    true,
+                    MAX_MESSAGE_BYTES);
 
             // 鉴权 + 上报协议版本。登记为当前连接之前先完成协议初始化，避免半初始化连接被业务线程使用。
-            created.send(prepend(WsProtocol.AUTH, token.getBytes(StandardCharsets.UTF_8)));
+            created.send(prepend(
+                    WsProtocol.AUTH,
+                    token.getBytes(StandardCharsets.UTF_8)));
             created.send(helloBytes());
 
             synchronized (LOCK) {
-                if (generation != myGeneration || thread != Thread.currentThread()) {
+                if (generation != myGeneration
+                        || thread != Thread.currentThread()) {
                     return;
                 }
                 conn = created;
@@ -210,24 +251,40 @@ public final class WsClient {
             }
 
             socket.setSoTimeout(0);
-            LOGGER.info("[WindUI] WebSocket 已连接 ws://{}:{}", host, port);
+            LOGGER.info(
+                    "[WindUI] WebSocket 已连接 ws://{}:{}",
+                    host,
+                    port);
 
             // 读循环：按频道字节分派。单个业务回调异常由 dispatch 隔离，不会杀死连接。
-            while (!Thread.currentThread().isInterrupted() && isCurrentConnection(myGeneration, created)) {
-                byte[] msg = created.recv();
-                dispatch(msg, cb);
+            while (!Thread.currentThread().isInterrupted()
+                    && isCurrentConnection(
+                            myGeneration,
+                            created)) {
+                byte[] message = created.recv();
+                dispatch(message, cb);
             }
         } catch (EOFException e) {
             if (isCurrentGeneration(myGeneration)) {
-                LOGGER.info("[WindUI] WebSocket 已由远端关闭");
+                LOGGER.info(
+                        "[WindUI] WebSocket 已由远端关闭");
             }
         } catch (IOException e) {
-            if (isCurrentGeneration(myGeneration) && !Thread.currentThread().isInterrupted()) {
-                LOGGER.warn("[WindUI] WebSocket 连接/读写失败 ws://{}:{}: {}", host, port, e.getMessage());
+            if (isCurrentGeneration(myGeneration)
+                    && !Thread.currentThread().isInterrupted()) {
+                LOGGER.warn(
+                        "[WindUI] WebSocket 连接/读写失败 ws://{}:{}: {}",
+                        host,
+                        port,
+                        e.getMessage());
             }
         } catch (RuntimeException e) {
             if (isCurrentGeneration(myGeneration)) {
-                LOGGER.warn("[WindUI] WebSocket 协议处理失败 ws://{}:{}", host, port, e);
+                LOGGER.warn(
+                        "[WindUI] WebSocket 协议处理失败 ws://{}:{}",
+                        host,
+                        port,
+                        e);
             }
         } finally {
             if (created != null) {
@@ -261,7 +318,9 @@ public final class WsClient {
         }
     }
 
-    private static boolean isCurrentConnection(long expectedGeneration, WsConnection expectedConnection) {
+    private static boolean isCurrentConnection(
+            long expectedGeneration,
+            WsConnection expectedConnection) {
         synchronized (LOCK) {
             return generation == expectedGeneration
                     && thread == Thread.currentThread()
@@ -269,7 +328,8 @@ public final class WsClient {
         }
     }
 
-    private static void removeIfCurrent(WsConnection failed) {
+    private static void removeIfCurrent(
+            WsConnection failed) {
         final Detached detached;
         synchronized (LOCK) {
             if (conn != failed) {
@@ -286,60 +346,99 @@ public final class WsClient {
         HudState.clear();
     }
 
-    private static void dispatch(byte[] msg, Callbacks cb) {
-        if (msg.length < 1) {
+    /**
+     * 分派一条完整的 WindUI 应用消息。
+     * <p>
+     * UI 是不带业务长度头的裸 UTF-8 JSON，因此必须在此显式使用严格解码器。
+     * CTRL/PATCH/HUD 等频道由各自 Codec 负责严格 UTF-8 与结构校验。
+     */
+    private static void dispatch(
+            byte[] message,
+            Callbacks cb) {
+        if (message == null || message.length < 1) {
             return;
         }
 
-        byte channel = msg[0];
-        byte[] data = new byte[msg.length - 1];
-        System.arraycopy(msg, 1, data, 0, data.length);
+        byte channel = message[0];
+        byte[] data = new byte[message.length - 1];
+        System.arraycopy(
+                message,
+                1,
+                data,
+                0,
+                data.length);
 
         switch (channel) {
             case WsProtocol.UI -> invokeCallback(
-                    "UI", () -> cb.onUi(new String(data, StandardCharsets.UTF_8)));
+                    "UI",
+                    () -> cb.onUi(
+                            WireCodecSupport.decodeUtf8(
+                                    data,
+                                    "UI JSON")));
             case WsProtocol.ASSET -> invokeCallback(
-                    "ASSET", () -> cb.onAsset(data));
+                    "ASSET",
+                    () -> cb.onAsset(data));
             case WsProtocol.CTRL -> invokeCallback(
-                    "CTRL", () -> cb.onControl(ControlCodec.decodeJson(data)));
+                    "CTRL",
+                    () -> cb.onControl(
+                            ControlCodec.decodeJson(data)));
             case WsProtocol.PATCH -> invokeCallback(
-                    "PATCH", () -> cb.onPatch(data));
+                    "PATCH",
+                    () -> cb.onPatch(data));
             case WsProtocol.HUD -> invokeCallback(
-                    "HUD", () -> cb.onHud(data));
-            default -> LOGGER.debug("[WindUI] 忽略未知 WebSocket 下行频道: {}", channel & 0xFF);
+                    "HUD",
+                    () -> cb.onHud(data));
+            default -> LOGGER.debug(
+                    "[WindUI] 忽略未知 WebSocket 下行频道: {}",
+                    channel & 0xFF);
         }
     }
 
     /**
-     * 隔离平台回调异常。坏资源或单次 UI 解析错误不应终止网络读循环，否则后续控制包和重推也无法到达。
+     * 隔离协议解码和平台回调异常。坏资源、畸形 UTF-8 或单次 UI 解析错误不应终止网络读循环，
+     * 否则后续控制包和重推也无法到达。
      */
-    private static void invokeCallback(String channel, Runnable callback) {
+    private static void invokeCallback(
+            String channel,
+            Runnable callback) {
         try {
             callback.run();
         } catch (RuntimeException e) {
-            LOGGER.warn("[WindUI] WebSocket {} 回调处理失败，已跳过本条消息", channel, e);
+            LOGGER.warn(
+                    "[WindUI] WebSocket {} 消息处理失败，已跳过本条消息",
+                    channel,
+                    e);
         }
     }
 
     private static byte[] helloBytes() {
-        int v = WindUIProtocol.VERSION;
+        int version = WindUIProtocol.VERSION;
         return new byte[]{
                 WsProtocol.HELLO,
-                (byte) (v >>> 24),
-                (byte) (v >>> 16),
-                (byte) (v >>> 8),
-                (byte) v
+                (byte) (version >>> 24),
+                (byte) (version >>> 16),
+                (byte) (version >>> 8),
+                (byte) version
         };
     }
 
-    private static byte[] prepend(byte channel, byte[] data) {
-        byte[] out = new byte[data.length + 1];
-        out[0] = channel;
-        System.arraycopy(data, 0, out, 1, data.length);
-        return out;
+    private static byte[] prepend(
+            byte channel,
+            byte[] data) {
+        byte[] output = new byte[data.length + 1];
+        output[0] = channel;
+        System.arraycopy(
+                data,
+                0,
+                output,
+                1,
+                data.length);
+        return output;
     }
 
     /** 从共享状态摘下、等待在锁外停止的一组连接资源。 */
-    private record Detached(WsConnection connection, Thread thread) {
+    private record Detached(
+            WsConnection connection,
+            Thread thread) {
     }
 }
