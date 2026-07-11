@@ -29,7 +29,7 @@ public final class HudRegistry {
     private static final String BUNDLED_DIR = "/windui/huds/";
 
     /** 随 JAR 提供、会在磁盘缺失时释放的示例 HUD id。 */
-    private static final List<String> DEFAULT_IDS = List.of("demo");
+    private static final List<String> DEFAULT_IDS = List.of("demo", "image_demo");
 
     private final Path hudsDir;
     private final Map<String, String> huds = new HashMap<>();

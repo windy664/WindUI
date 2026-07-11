@@ -23,13 +23,17 @@ type ComponentType =
   | "Model3D";       // 3D 模型/实体（MinecraftSurfaceView）
 
 // Model3D props：
-//   type: 后端。"item"(默认) / "entity"(待做) / "geckolib"(1.21.1 软依赖)
+//   type: 后端。"item"(默认) / "entity" / "geckolib"(1.21.1 软依赖)
 //   width/height: SurfaceView 面板尺寸，建议显式填写
 //   modelScale: Surface 内 3D 内容缩放。新界面必须用该属性控制模型大小
 //   scale: 通用 ModernUI View 缩放，会缩放整个 View；不要用它代替 modelScale
 //
 // item 后端：
 //   model: 物品 id，如 "minecraft:diamond"
+//
+// entity 后端：
+//   model: 生物实体 id，如 "minecraft:zombie"；仅支持 LivingEntity
+//   modelScale: 传给原版物品栏实体渲染器的像素尺寸，默认 30
 //
 // geckolib 后端：
 //   geo: 模型资源，如 "ns:geo/xxx.geo.json"
@@ -39,7 +43,8 @@ type ComponentType =
 //   spin: 是否自转，默认 true
 //
 // 客户端无对应后端、GeckoLib 未安装或资源非法时，该节点会被跳过。
-// JS helper：ui.model(itemId, props) / ui.geckoModel(geo, texture, props)。
+// JS helper：ui.model(itemId, props) / ui.entityModel(entityId, props) /
+//            ui.geckoModel(geo, texture, props)。
 
 // ===== 动作定义 =====
 
@@ -96,6 +101,14 @@ interface UIElement {
   /** Slider 松手时触发 */
   onChange?: Action | Action[];
 }
+
+// ===== 根节点专用 props =====
+//
+// dimBackground: boolean
+//   是否绘制全屏遮罩，默认 true。设为 false 时 overlayColor 不生效。
+// overlayColor: string
+//   自定义全屏单色遮罩，支持 "#RRGGBB" / "#AARRGGBB"。
+//   未设置时使用 WindUI 默认的靛蓝渐变。
 
 // ===== 通用 props =====
 //

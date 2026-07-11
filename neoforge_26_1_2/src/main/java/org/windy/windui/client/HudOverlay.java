@@ -1,16 +1,23 @@
 package org.windy.windui.client;
 
+import com.mojang.blaze3d.platform.NativeImage;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.renderer.texture.DynamicTexture;
+import net.minecraft.resources.Identifier;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.RenderGuiEvent;
 import org.windy.windui.WindUI;
 import org.windy.windui.client.hud.HudCanvas;
+import org.windy.windui.client.hud.HudImageStore;
 import org.windy.windui.client.hud.HudRenderer;
 import org.windy.windui.client.hud.HudState;
+
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * HUD 渲染钩子（<b>平台特定 glue</b>，NeoForge 26.1.2）。每帧把 {@link HudState} 里的面板用共享
@@ -22,6 +29,39 @@ import org.windy.windui.client.hud.HudState;
 public final class HudOverlay {
 
     private HudOverlay() {
+    }
+
+    /** hash → 已注册的 vanilla 纹理。{@code id==null} 的 {@link #BAD} 表示解码失败,不再重试。 */
+    private record Tex(Identifier id, int w, int h) {
+    }
+
+    private static final Tex BAD = new Tex(null, 0, 0);
+    private static final Map<String, Tex> TEX = new ConcurrentHashMap<>();
+
+    /**
+     * 惰性把某 asset 的原始 PNG 字节建成 vanilla 纹理(本方法在渲染线程内调用,GL 上传安全)。
+     * 字节未到返回 {@code null}(下帧再试);解码失败缓存 {@link #BAD}(不再重试)。
+     */
+    private static Tex texture(String hash) {
+        Tex t = TEX.get(hash);
+        if (t != null) {
+            return t;
+        }
+        byte[] png = HudImageStore.get(hash);
+        if (png == null) {
+            return null; // 字节还没到,别缓存,下帧再试
+        }
+        try {
+            NativeImage img = NativeImage.read(png);
+            DynamicTexture dyn = new DynamicTexture(() -> "windui_hud/" + hash, img); // 接管 img,不要 close
+            Identifier id = Identifier.fromNamespaceAndPath("windui", "hud/" + hash);
+            Minecraft.getInstance().getTextureManager().register(id, dyn);
+            t = new Tex(id, img.getWidth(), img.getHeight());
+        } catch (Exception e) {
+            t = BAD;
+        }
+        TEX.put(hash, t);
+        return t;
     }
 
     @SubscribeEvent
@@ -71,6 +111,13 @@ public final class HudOverlay {
             if (stack.isEmpty()) return;
             gg.item(stack, x, y);
             gg.itemDecorations(font(), stack, x, y);
+        }
+
+        @Override public void drawImage(String hash, int x, int y, int w, int h) {
+            Tex tex = texture(hash);
+            if (tex == null || tex.id() == null) return;
+            // 8 参 blit:UV 归一化整图(0..1)拉伸进 (x,y,w,h)。
+            gg.blit(tex.id(), x, y, w, h, 0f, 0f, 1f, 1f);
         }
     }
 }

@@ -33,4 +33,13 @@ public interface HudCanvas {
      * @param count  数量(>1 显示角标)
      */
     void drawItem(String itemId, int count, int x, int y);
+
+    /**
+     * 把服务端下发的自定义 PNG(经 asset 通道)画进矩形 [x,y,x+w,y+h)。
+     * <p>每版实现惰性把该 hash 的原始字节(见 {@code HudImageStore})解码成 vanilla 纹理并 blit;
+     * 字节未到 / 解码失败则不画(优雅缺失,不崩)。
+     *
+     * @param hash asset 内容哈希(界面里 {@code asset:<hash>} 引用去掉前缀)
+     */
+    void drawImage(String hash, int x, int y, int w, int h);
 }

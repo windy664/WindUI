@@ -35,4 +35,13 @@ dependencies {
     compileOnly 'org.slf4j:slf4j-api:2.0.13'
 
     // 传输层已改为独立端口 WebSocket（{@code WsClient}，纯 java.net），不再依赖 Netty。
+
+    // 仅用于测试版本无关的纯逻辑（如 HudRenderer 的布局/元素分派，不碰 ModernUI/MC）。
+    testImplementation platform('org.junit:junit-bom:5.11.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
 }

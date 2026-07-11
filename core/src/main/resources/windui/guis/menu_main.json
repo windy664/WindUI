@@ -1,16 +1,93 @@
 {
   "type": "LinearLayout",
-  "props": { "orientation": 1, "gravity": "center", "padding": 22 },
+  "props": {
+    "orientation": 1,
+    "gravity": "center",
+    "padding": 22,
+    "overlayColor": "#66000000"
+  },
   "children": [
     {
       "type": "LinearLayout",
-      "props": { "orientation": 1, "background": "#14FFFFFF", "border": "#26FFFFFF", "radius": 16, "padding": 16 },
+      "props": {
+        "orientation": 1,
+        "width": 360,
+        "background": "#F5FFFFFF",
+        "border": "#1F000000",
+        "borderWidth": 1,
+        "radius": 22,
+        "padding": 18
+      },
       "children": [
-        { "type": "TextView", "props": { "text": "服务器菜单", "textSize": 24, "textColor": "#EAF2FF" } },
-        { "type": "TextView", "props": { "text": "你好 %player_name%  ·  在线 %server_online% 人", "textSize": 12, "textColor": "#7E8CA0", "margin": 2 } },
-        { "type": "Button", "props": { "text": "商店", "textSize": 15, "textColor": "#66E0A3", "margin": 3 }, "onClick": { "action": "executeCommand", "args": ["/windui open shop"] } },
-        { "type": "Button", "props": { "text": "返回出生点", "textSize": 15, "textColor": "#4FA3FF", "margin": 3 }, "onClick": [ { "action": "executeCommand", "args": ["/spawn"] }, { "action": "closeScreen" } ] },
-        { "type": "Button", "props": { "text": "关闭", "textSize": 14, "textColor": "#8B97A6", "margin": 3 }, "onClick": { "action": "closeScreen" } }
+        { "type": "TextView", "props": { "text": "服务器", "textSize": 26, "textColor": "#FF1C1C1E" } },
+        {
+          "type": "TextView",
+          "props": {
+            "text": "你好，%player_name%  ·  %server_online% 人在线",
+            "textSize": 12,
+            "textColor": "#FF8E8E93",
+            "margin": 3
+          }
+        },
+        { "type": "TextView", "props": { "text": "快捷操作", "textSize": 12, "textColor": "#FF8E8E93", "margin": 7 } },
+        {
+          "type": "LinearLayout",
+          "props": {
+            "orientation": 1,
+            "width": 320,
+            "background": "#FFF2F2F7",
+            "radius": 14,
+            "padding": 6
+          },
+          "children": [
+            {
+              "type": "Button",
+              "props": {
+                "text": "商店",
+                "textSize": 15,
+                "textColor": "#FFFFFFFF",
+                "background": "#007AFF",
+                "radius": 10,
+                "width": 294,
+                "height": 40,
+                "margin": 3
+              },
+              "onClick": { "action": "executeCommand", "args": ["/windui open shop"] }
+            },
+            { "type": "Divider", "props": { "width": 286, "height": 1, "color": "#243C3C43", "margin": 3 } },
+            {
+              "type": "Button",
+              "props": {
+                "text": "返回出生点",
+                "textSize": 15,
+                "textColor": "#007AFF",
+                "background": "#14007AFF",
+                "radius": 10,
+                "width": 294,
+                "height": 40,
+                "margin": 3
+              },
+              "onClick": [
+                { "action": "executeCommand", "args": ["/spawn"] },
+                { "action": "closeScreen" }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "Button",
+          "props": {
+            "text": "完成",
+            "textSize": 15,
+            "textColor": "#007AFF",
+            "background": "#14007AFF",
+            "radius": 10,
+            "width": 100,
+            "height": 36,
+            "margin": 8
+          },
+          "onClick": { "action": "closeScreen" }
+        }
       ]
     }
   ]

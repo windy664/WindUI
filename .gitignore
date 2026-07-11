@@ -20,3 +20,15 @@ hs_err_pid*
 # Common working directory
 run
 .aider*
+
+# Eclipse / VS Code / IDE 编译输出
+bin/
+.eclipse/
+.vscode/
+.classpath
+.project
+.settings/
+
+# AI 生成的交接/记录文档，不入库
+DEVELOPMENT.md
+ACCEPTANCE.md

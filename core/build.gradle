@@ -2,9 +2,14 @@ plugins {
     id 'java-library'
 }
 
-// core 被 Java 21(client_modernui/neoforge_1_21_1) 与 Java 25(neoforge_26_1_2/velocity) 共用，
-// 必须编到最低的 Java 21（纯逻辑，无需高版本特性），否则 21 侧无法依赖。
+// core 被所有平台共用，且要被打进 1.16 服的 jar（低版本 JVM 加载，见 bukkit_1_16）。
+// 编到 Java 16 字节码（class 60）：records/switch表达式/模式匹配/toList 全是 Java 16 特性，代码零改动，
+// 却能跑 Java 16/17（1.16 服）以及 21/25（现代平台）。toolchain 用 21，javac --release 16 降级输出。
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+tasks.named('compileJava') {
+    options.release = 16
+}
 
 repositories {
     mavenCentral()

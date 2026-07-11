@@ -2,7 +2,9 @@ plugins {
     id 'java-library'
 }
 
-java.toolchain.languageVersion = JavaLanguageVersion.of(25)
+// Velocity 运行环境按 Java 21 作为最低基线；不要跟随 26.1.2 客户端模块升到 Java 25。
+// 否则插件会产出 class 69，无法被 Java 21 的代理加载（最高只支持 class 65）。
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 
 // 产物命名:windui-velocity-<version>.jar(默认会取子项目名 velocity,与 Velocity 本体撞概念、看不出是啥)
 base {
@@ -22,6 +24,19 @@ dependencies {
     // Velocity API
     compileOnly 'com.velocitypowered:velocity-api:3.3.0-SNAPSHOT'
     annotationProcessor 'com.velocitypowered:velocity-api:3.3.0-SNAPSHOT'
+
+    // Configurate 由 Velocity 运行时提供；显式声明用于读取 config.yml。
+    compileOnly 'org.spongepowered:configurate-yaml:4.1.2'
+
+    testImplementation 'org.spongepowered:configurate-yaml:4.1.2'
+    testImplementation 'org.slf4j:slf4j-api:2.0.12'
+    testImplementation platform('org.junit:junit-bom:5.11.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
 }
 
 // 手动把 core + server_core 的编译输出 + Rhino 库内容打进最终 jar（不引 shadow 插件）
@@ -29,6 +44,11 @@ jar {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     from(project(':core').sourceSets.main.output)
     from(project(':server_core').sourceSets.main.output)
-    from({ configurations.runtimeClasspath.findAll { it.name.contains('rhino') }.collect { zipTree(it) } })
+    // Rhino（JS 引擎）+ Kotlin stdlib/协程（server_core 的 WS 传输层用）打进 jar；平台不提供这些。
+    from({
+        configurations.runtimeClasspath.findAll {
+            it.name.contains('rhino') || it.name.contains('kotlin') || it.name.startsWith('annotations')
+        }.collect { zipTree(it) }
+    })
     dependsOn ':core:classes', ':server_core:classes'
 }

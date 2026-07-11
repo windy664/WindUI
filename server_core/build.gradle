@@ -2,10 +2,24 @@
 // 平台无关——velocity / 未来 bukkit 各自只写薄 glue（实现 UiHost、提供 ctx 数据、执行发包）。
 plugins {
     id 'java-library'
+    // Kotlin 仅用于 WS 传输层（协程+异步NIO 扛上万并发）；其余 server_core 文件保持 Java。
+    id 'org.jetbrains.kotlin.jvm'
 }
 
-// 与 core 一致编到 Java 21（服务端 velocity 跑 Java 25 能加载；未来 Paper 1.21.1 是 Java 21）。
+// Java 与 Kotlin 都编到 Java 16 字节码（class 60）：能被打进 1.16 服的 jar（低 JVM 加载）以及现代平台。
+// Java 文件用 --release 16（records/文本块/switch表达式是 Java 16 特性，代码零改动）。
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+tasks.named('compileJava') {
+    options.release = 16
+}
+
+// Kotlin 字节码目标 Java 16（与 Java 侧一致）。
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_16
+    }
+}
 
 repositories {
     mavenCentral()
@@ -17,6 +31,9 @@ dependencies {
 
     // Rhino —— 服务端 JS 引擎（纯 Java 库，非模组）。AI 写的界面脚本在服务端跑。
     api 'org.mozilla:rhino:1.7.15'
+
+    // 协程 —— WS 传输层每连接一个协程（几 KB）+ 异步 NIO，扛上万并发。运行时由平台 jar 打包。
+    api 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0'
 
     // 测试：Gson 运行时由平台(velocity/MC)提供；core 的协议编解码(ControlCodec)编译期用它，
     // 故 server_core 测试需真实提供 Gson 才能跑通控制频道相关用例。

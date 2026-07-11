@@ -1,15 +1,68 @@
 {
   "type": "LinearLayout",
-  "props": { "orientation": 1, "gravity": "center", "padding": 22 },
+  "props": {
+    "orientation": 1,
+    "gravity": "center",
+    "padding": 22,
+    "overlayColor": "#66000000"
+  },
   "children": [
     {
       "type": "LinearLayout",
-      "props": { "orientation": 1, "gravity": "center", "background": "#14FFFFFF", "border": "#26FFFFFF", "radius": 16, "padding": 20 },
+      "props": {
+        "orientation": 1,
+        "gravity": "center",
+        "width": 350,
+        "background": "#F5FFFFFF",
+        "border": "#1F000000",
+        "borderWidth": 1,
+        "radius": 22,
+        "padding": 22
+      },
       "children": [
-        { "type": "TextView", "props": { "text": "欢迎回来", "textSize": 26, "textColor": "#EAF2FF" } },
-        { "type": "TextView", "props": { "text": "%player_name%", "textSize": 18, "textColor": "#66E0A3", "margin": 3 } },
-        { "type": "TextView", "props": { "text": "%player_server%  ·  在线 %server_online%  ·  %player_ping%ms", "textSize": 12, "textColor": "#7E8CA0", "margin": 2 } },
-        { "type": "Button", "props": { "text": "进入菜单", "textSize": 15, "textColor": "#4FA3FF", "margin": 6 }, "onClick": [ { "action": "executeCommand", "args": ["/windui open menu_main"] }, { "action": "closeScreen" } ] }
+        { "type": "TextView", "props": { "text": "欢迎回来", "textSize": 27, "textColor": "#FF1C1C1E" } },
+        { "type": "TextView", "props": { "text": "%player_name%", "textSize": 17, "textColor": "#007AFF", "margin": 4 } },
+        {
+          "type": "LinearLayout",
+          "props": {
+            "orientation": 1,
+            "gravity": "center",
+            "width": 300,
+            "background": "#FFF2F2F7",
+            "radius": 14,
+            "padding": 10,
+            "margin": 7
+          },
+          "children": [
+            { "type": "TextView", "props": { "text": "%player_server%", "textSize": 14, "textColor": "#FF1C1C1E" } },
+            {
+              "type": "TextView",
+              "props": {
+                "text": "%server_online% 人在线  ·  %player_ping% ms",
+                "textSize": 12,
+                "textColor": "#FF8E8E93",
+                "margin": 3
+              }
+            }
+          ]
+        },
+        {
+          "type": "Button",
+          "props": {
+            "text": "进入菜单",
+            "textSize": 15,
+            "textColor": "#FFFFFFFF",
+            "background": "#007AFF",
+            "radius": 10,
+            "width": 180,
+            "height": 42,
+            "margin": 7
+          },
+          "onClick": [
+            { "action": "executeCommand", "args": ["/windui open menu_main"] },
+            { "action": "closeScreen" }
+          ]
+        }
       ]
     }
   ]

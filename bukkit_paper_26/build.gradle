@@ -1,0 +1,40 @@
+// Paper 26.2 打包壳：入口/命令/库存实现全在 bukkit_common（Java 21，跨版本共享）。本模块只出一个
+// 面向 26.2 的 jar（paper-plugin.yml + 打包 core+server_core+bukkit_common+rhino）。无 Java 源。
+// 若 26.x 的入口/库存 API 真漂移，再在本模块加覆盖类（届时补 compileOnly paper-api 26.2）。
+plugins {
+    id 'java-library'
+}
+
+// 无源；Java 21 与 bukkit_common 一致（一份 Java 21 字节码被 Java 21/25 运行时都能加载）。
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+base {
+    archivesName = 'windui-paper-26'
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://repo.papermc.io/repository/maven-public/' }
+}
+
+dependencies {
+    implementation project(':bukkit_common') // 传递带入 core + server_core（+ Rhino）
+}
+
+evaluationDependsOn(':core')
+evaluationDependsOn(':server_core')
+evaluationDependsOn(':bukkit_common')
+
+jar {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from(project(':core').sourceSets.main.output)
+    from(project(':server_core').sourceSets.main.output)
+    from(project(':bukkit_common').sourceSets.main.output)
+    // Rhino + Kotlin stdlib/协程（server_core 的 WS 传输层用）打进 jar；平台不提供这些。
+    from({
+        configurations.runtimeClasspath.findAll {
+            it.name.contains('rhino') || it.name.contains('kotlin') || it.name.startsWith('annotations')
+        }.collect { zipTree(it) }
+    })
+    dependsOn ':core:classes', ':server_core:classes', ':bukkit_common:classes'
+}

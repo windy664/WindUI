@@ -97,7 +97,8 @@ public final class WindUIClient {
             }
             @Override public void onAsset(byte[] framed) {
                 AssetCodec.Asset asset = AssetCodec.decode(framed);
-                // 解码+建纹理须在 ModernUI UI 线程
+                // 留一份原始字节给 HUD(vanilla 纹理惰性建);Screen 路仍解码成 ModernUI Image(须 UI 线程)。
+                org.windy.windui.client.hud.HudImageStore.put(asset.hash(), asset.png());
                 Minecraft.getInstance().execute(() ->
                         Core.executeOnUiThread(() -> AssetCache.decodeAndCache(asset.hash(), asset.png())));
             }

@@ -1,0 +1,3 @@
+# WindUI WebSocket 独立监听端口。
+# 修改后需重启 Velocity，并为该 TCP 端口放行防火墙。
+websocket-port: 25599

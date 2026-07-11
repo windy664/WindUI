@@ -5,6 +5,7 @@ import org.windy.windui.core.gui.GuiRegistry;
 import org.windy.windui.core.gui.HudRegistry;
 import org.windy.windui.core.parser.UIJsonParser;
 import org.windy.windui.core.protocol.ControlCodec;
+import org.windy.windui.core.protocol.HudCodec;
 import org.windy.windui.core.protocol.PatchCodec;
 import org.windy.windui.core.protocol.WindUIProtocol;
 import org.windy.windui.server.asset.ImgStore;
@@ -35,10 +36,16 @@ class GuiDriverTest {
         final List<byte[]> patches = new ArrayList<>();
         final List<byte[]> huds = new ArrayList<>();
         final List<String> timeline = new ArrayList<>();
+        InventoryOps inv; // 默认 null（无库存，如代理）；测试真库存时注入
 
         @Override
         public UUID id() {
             return id;
+        }
+
+        @Override
+        public InventoryOps inventory() {
+            return inv;
         }
 
         @Override
@@ -386,5 +393,99 @@ class GuiDriverTest {
 
         driver.open(host, "t");
         assertEquals(1, host.assets.size(), "同一图第二次不该重推（会话去重）");
+    }
+
+    @Test
+    void hudPushesAssetsAndRewrites() throws Exception {
+        Path base = Files.createTempDirectory("w");
+        Files.createDirectories(base.resolve("img"));
+        Files.write(base.resolve("img").resolve("logo.png"), new byte[]{9, 8, 7, 6});
+
+        GuiDriver driver = driver(base);
+        FakeHost host = new FakeHost();
+        driver.clients().noteHello(host.id(), WindUIProtocol.VERSION); // HUD 特性需协议 v3
+
+        String panels = "[{\"anchor\":\"top_left\",\"root\":"
+                + "{\"type\":\"ImageView\",\"props\":{\"src\":\"img:logo.png\",\"width\":128,\"height\":128}}}]";
+        driver.hud(host, panels);
+
+        assertEquals(1, host.assets.size(), "HUD 里的 img: 也应经 asset 通道推一张图");
+        assertEquals(1, host.huds.size(), "应下发一帧 HUD");
+
+        // 下发的 HUD 面板里 img: 应已被重写成 asset:hash（与 open() 同款）。
+        HudCodec.Panel panel = HudCodec.decode(host.huds.get(0)).get(0);
+        String src = panel.root().getString("src", "");
+        assertTrue(src.startsWith("asset:"), "HUD 的 img: 应被重写为 asset:hash，实际=" + src);
+    }
+
+    @Test
+    void hudSkippedForLegacyClient() throws Exception {
+        GuiDriver driver = driver(Files.createTempDirectory("w"));
+        FakeHost host = new FakeHost(); // 未 noteHello → 视为 v0，不支持 HUD 特性
+        driver.hud(host, "[]");
+        assertTrue(host.huds.isEmpty(), "旧客户端不应收到 HUD 帧");
+    }
+
+    /** 记录 give/take 调用的 InventoryOps。 */
+    private static final class RecordingInventory implements InventoryOps {
+        String givenId;
+        int givenCount;
+        String takenId;
+        int takenCount;
+
+        @Override public java.util.List<ItemView> snapshot() {
+            return java.util.List.of();
+        }
+
+        @Override public boolean give(String itemId, int count) {
+            givenId = itemId;
+            givenCount = count;
+            return true;
+        }
+
+        @Override public int take(String itemId, int count) {
+            takenId = itemId;
+            takenCount = count;
+            return count;
+        }
+    }
+
+    @Test
+    void giveTakeEffectsReachHostInventory() throws Exception {
+        Path base = Files.createTempDirectory("w");
+        Files.createDirectories(base.resolve("scripts"));
+        Files.writeString(base.resolve("scripts").resolve("inv.js"),
+                "function render(ctx){return {type:'TextView',props:{text:'inv'}};}\n"
+                        + "function onEvent(ctx,event,data){\n"
+                        + "  if(event==='give') ctx.give(data[0], 3);\n"
+                        + "  else if(event==='take') ctx.take(data[0], 2);\n"
+                        + "}");
+        GuiDriver driver = driver(base);
+        RecordingInventory inv = new RecordingInventory();
+        FakeHost host = new FakeHost();
+        host.inv = inv;
+
+        driver.open(host, "inv");
+        assertTrue(driver.event(host, "give", List.of("minecraft:diamond")));
+        assertEquals("minecraft:diamond", inv.givenId);
+        assertEquals(3, inv.givenCount);
+
+        assertTrue(driver.event(host, "take", List.of("minecraft:dirt")));
+        assertEquals("minecraft:dirt", inv.takenId);
+        assertEquals(2, inv.takenCount);
+    }
+
+    @Test
+    void inventoryEffectsNoOpWhenHostHasNoInventory() throws Exception {
+        Path base = Files.createTempDirectory("w");
+        Files.createDirectories(base.resolve("scripts"));
+        Files.writeString(base.resolve("scripts").resolve("inv.js"),
+                "function render(ctx){return {type:'TextView',props:{text:'inv'}};}\n"
+                        + "function onEvent(ctx,event,data){ ctx.give('minecraft:diamond', 1); }");
+        GuiDriver driver = driver(base);
+        FakeHost host = new FakeHost(); // inv 为 null（代理型 host，无库存）
+        driver.open(host, "inv");
+        // 不应抛异常，静默跳过
+        assertTrue(driver.event(host, "give", List.of()));
     }
 }

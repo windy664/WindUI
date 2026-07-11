@@ -46,4 +46,13 @@ public interface UiHost {
      * 客户端用 vanilla GuiGraphics 直绘非模态 HUD;空面板 = 清空。
      */
     void sendHud(byte[] payload);
+
+    /**
+     * 玩家真库存能力（<b>可选</b>）。后端 host（Bukkit/Paper）返回真实实现；纯代理（Velocity）
+     * 无世界/库存，返回 {@code null}。脚本的 {@code ctx.give/ctx.take} 与 {@code ctx.inventory}
+     * 经此落地——host 无库存时相关效果静默跳过。
+     */
+    default InventoryOps inventory() {
+        return null;
+    }
 }

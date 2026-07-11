@@ -10,7 +10,9 @@ import java.util.List;
  * 版本无关的 HUD 布局/绘制引擎。把一组锚定面板(SDUI 子树)用 {@link HudCanvas} 原语画到 HUD 层。
  * <p>
  * 支持子集:{@code LinearLayout}(orientation 0/1 = 行/列)+ {@code TextView} / {@code Markdown}(多行) /
- * {@code Bar}(进度条) / {@code Divider}。容器支持 {@code background}/{@code border}/{@code radius(忽略)}/{@code padding}。
+ * {@code Bar}(进度条) / {@code Divider} / {@code ItemSlot}(真实物品) / {@code ImageView}(服务端下发的
+ * 自定义 PNG,{@code src:"asset:<hash>"};{@code img:} 由服务端重写而来)。容器支持
+ * {@code background}/{@code border}/{@code radius(忽略)}/{@code padding}。
  * <p>用 vanilla GuiGraphics 直绘,不碰 ModernUI 离屏,几乎零开销(文字仍走 ModernUI 引擎的字体 mixin)。
  */
 public final class HudRenderer {
@@ -60,6 +62,7 @@ public final class HudRenderer {
             case "Bar" -> new Size(n.getInt("width", 120), n.getInt("height", 6));
             case "Divider" -> new Size(n.getInt("width", 80), n.getInt("height", 1) + n.getInt("margin", 0) * 2);
             case "ItemSlot" -> new Size(n.getInt("size", 16), n.getInt("size", 16));
+            case "ImageView" -> new Size(n.getInt("width", 16), n.getInt("height", 16));
             default -> new Size(0, 0);
         };
         return new Size(inner.w + pad * 2, inner.h + pad * 2);
@@ -107,6 +110,15 @@ public final class HudRenderer {
                 c.fill(cx, cy + m, cx + w, cy + m + h, color(n.getString("color", "#26FFFFFF")));
             }
             case "ItemSlot" -> c.drawItem(n.getString("item", ""), n.getInt("count", 1), cx, cy);
+            case "ImageView" -> {
+                // 服务端已把 img:path 重写成 asset:hash;只有 asset: 前缀才有下发字节可画,
+                // 其余(未解析的 img: / MC 资源路径 / 缺失)在 HUD 层优雅跳过。
+                String src = n.getString("src", "");
+                if (src.startsWith("asset:")) {
+                    c.drawImage(src.substring("asset:".length()),
+                            cx, cy, n.getInt("width", 16), n.getInt("height", 16));
+                }
+            }
             default -> { /* 未知类型忽略 */ }
         }
     }

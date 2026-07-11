@@ -82,6 +82,9 @@ public final class GuiDriver {
         if (!clients.supports(host.id(), ProtocolFeatures.HUD)) {
             return;
         }
+        // 与 open() 同款：HUD 面板里的 img:<path> 也要经 asset 通道下发字节并重写成 asset:<hash>,
+        // 否则 HUD 的 ImageView 拿不到图。会话内去重由 sentAssets 负责。
+        panelsJson = pushAssetsAndRewrite(host, panelsJson);
         host.sendHud(HudCodec.encode(panelsJson));
     }
 
@@ -295,6 +298,11 @@ public final class GuiDriver {
                     flushPending(host, currentGui, pending);
                     hud(host, "[]");
                 }
+                case "give", "take" -> {
+                    // 真库存操作：立即执行（服务端权威），host 无库存能力则静默跳过。
+                    flushPending(host, currentGui, pending);
+                    applyInventory(host, effect.type(), effect.arg());
+                }
                 default -> {
                     // 未知效果不能跨越并重排已有批次；先刷新，再忽略未知效果。
                     flushPending(host, currentGui, pending);
@@ -303,6 +311,35 @@ public final class GuiDriver {
         }
 
         flushPending(host, currentGui, pending);
+    }
+
+    /**
+     * 执行真库存效果 {@code give}/{@code take}。{@code arg} 格式 {@code "<itemId>\t<count>"}。
+     * host 无库存能力（如纯代理 Velocity）或参数非法则静默跳过——脚本可移植，效果按平台能力降级。
+     */
+    private void applyInventory(UiHost host, String type, String arg) {
+        InventoryOps inv = host.inventory();
+        if (inv == null || arg == null) {
+            return;
+        }
+        int tab = arg.indexOf('\t');
+        String itemId = tab < 0 ? arg : arg.substring(0, tab);
+        int count = 1;
+        if (tab >= 0) {
+            try {
+                count = Integer.parseInt(arg.substring(tab + 1).trim());
+            } catch (NumberFormatException ignored) {
+                count = 1;
+            }
+        }
+        if (count <= 0 || itemId.isBlank()) {
+            return;
+        }
+        if ("give".equals(type)) {
+            inv.give(itemId, count);
+        } else {
+            inv.take(itemId, count);
+        }
     }
 
     /**

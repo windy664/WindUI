@@ -1,19 +1,72 @@
 {
   "type": "LinearLayout",
-  "props": { "orientation": 1, "gravity": "center", "padding": 22 },
+  "props": {
+    "orientation": 1,
+    "gravity": "center",
+    "padding": 22,
+    "overlayColor": "#73000000"
+  },
   "children": [
     {
       "type": "LinearLayout",
-      "props": { "orientation": 1, "gravity": "center", "background": "#14FFFFFF", "border": "#26FFFFFF", "radius": 16, "padding": 18 },
+      "props": {
+        "orientation": 1,
+        "gravity": "center",
+        "width": 330,
+        "background": "#F8FFFFFF",
+        "border": "#1F000000",
+        "borderWidth": 1,
+        "radius": 22,
+        "padding": 20
+      },
       "children": [
-        { "type": "TextView", "props": { "text": "确认操作", "textSize": 22, "textColor": "#EAF2FF" } },
-        { "type": "TextView", "props": { "text": "确定要执行此操作吗？此操作不可撤销。", "textSize": 13, "textColor": "#B8C4D6", "margin": 6 } },
+        { "type": "TextView", "props": { "text": "确认操作", "textSize": 21, "textColor": "#FF1C1C1E" } },
+        {
+          "type": "TextView",
+          "props": {
+            "text": "确定要继续吗？此操作不可撤销。",
+            "textSize": 13,
+            "textColor": "#FF8E8E93",
+            "width": 278,
+            "margin": 7
+          }
+        },
+        { "type": "Divider", "props": { "width": 284, "height": 1, "color": "#243C3C43", "margin": 5 } },
         {
           "type": "LinearLayout",
-          "props": { "orientation": 0, "gravity": "center" },
+          "props": { "orientation": 0, "gravity": "center", "padding": 5 },
           "children": [
-            { "type": "Button", "props": { "text": "确认", "textSize": 15, "textColor": "#66E0A3", "margin": 4 }, "onClick": [ { "action": "callback", "id": "confirm_yes", "data": [] }, { "action": "closeScreen" } ] },
-            { "type": "Button", "props": { "text": "取消", "textSize": 15, "textColor": "#8B97A6", "margin": 4 }, "onClick": { "action": "closeScreen" } }
+            {
+              "type": "Button",
+              "props": {
+                "text": "取消",
+                "textSize": 15,
+                "textColor": "#007AFF",
+                "background": "#14007AFF",
+                "radius": 10,
+                "width": 126,
+                "height": 40,
+                "margin": 4
+              },
+              "onClick": { "action": "closeScreen" }
+            },
+            {
+              "type": "Button",
+              "props": {
+                "text": "确认",
+                "textSize": 15,
+                "textColor": "#FFFFFFFF",
+                "background": "#FF3B30",
+                "radius": 10,
+                "width": 126,
+                "height": 40,
+                "margin": 4
+              },
+              "onClick": [
+                { "action": "callback", "id": "confirm_yes", "data": [] },
+                { "action": "closeScreen" }
+              ]
+            }
           ]
         }
       ]

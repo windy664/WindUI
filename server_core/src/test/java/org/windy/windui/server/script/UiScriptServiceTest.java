@@ -42,6 +42,8 @@ class UiScriptServiceTest {
         assertNotNull(json);
         assertTrue(json.contains("Button"), "shop 应含按钮");
         assertTrue(json.contains("Steve"), "ctx.player 应被拼进去");
+        assertTrue(json.contains("#007AFF"), "默认示例应使用 iOS 系统蓝");
+        assertTrue(json.contains("\"overlayColor\":\"#66000000\""), "默认示例应使用中性遮罩");
     }
 
     @Test
@@ -53,6 +55,10 @@ class UiScriptServiceTest {
         assertTrue(json.contains("TextBox"), "showcase 应含输入框");
         assertTrue(json.contains("Bar"), "showcase 应含进度条");
         assertTrue(json.contains("Divider"), "showcase 应含分隔线");
+        assertTrue(json.contains("\"type\":\"entity\""), "showcase 应含 vanilla entity Model3D");
+        assertTrue(json.contains("minecraft:zombie"), "entity Model3D 应使用可用的原版实体 id");
+        assertTrue(json.contains("#F5FFFFFF"), "showcase 应使用 iOS 半透明白卡");
+        assertTrue(json.contains("\"overlayColor\":\"#66000000\""), "showcase 应覆盖默认深蓝背景");
     }
 
     @Test

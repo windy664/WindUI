@@ -1,0 +1,26 @@
+[
+  {
+    "anchor": "top_left",
+    "x": 8,
+    "y": 8,
+    "root": {
+      "type": "LinearLayout",
+      "props": {
+        "orientation": 1,
+        "background": "#EFFFFFFF",
+        "border": "#24000000",
+        "padding": 8
+      },
+      "children": [
+        {
+          "type": "ImageView",
+          "props": { "src": "img:hud_logo.png", "width": 128, "height": 128 }
+        },
+        {
+          "type": "TextView",
+          "props": { "text": "自定义 PNG · HUD", "textColor": "#FF1C1C1E", "margin": 4 }
+        }
+      ]
+    }
+  }
+]

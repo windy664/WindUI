@@ -15,6 +15,7 @@ import icyllis.modernui.widget.LinearLayout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.windy.windui.core.parser.UIJsonParser;
+import org.windy.windui.core.parser.WidgetNode;
 import org.windy.windui.core.script.ActionExecutor;
 import org.windy.windui.core.script.SafeClientAPI;
 
@@ -28,7 +29,7 @@ import org.windy.windui.core.script.SafeClientAPI;
 public class SDUIScreen extends Fragment {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("WindUI");
-    // 背景：海军蓝→靛蓝对角渐变(半透明,游戏画面隐约透出)
+    // 默认背景：海军蓝→靛蓝对角渐变（兼容已有界面的视觉效果）。
     private static final int[] BG_GRADIENT = {0xF20A1830, 0xF2122A4E};
 
     private final ViewFactory viewFactory;
@@ -57,8 +58,7 @@ public class SDUIScreen extends Fragment {
         rootContainer.setOrientation(LinearLayout.VERTICAL);
         rootContainer.setGravity(Gravity.CENTER);
 
-        var bg = new GradientDrawable(GradientDrawable.Orientation.TL_BR, BG_GRADIENT);
-        rootContainer.setBackground(bg);
+        applyDefaultBackground();
 
         rootContainer.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -95,6 +95,7 @@ public class SDUIScreen extends Fragment {
 
         try {
             var root = UIJsonParser.parse(uiJson);
+            applyScreenBackground(root);
             viewFactory.clearRegistries(); // 丢弃上一次渲染登记的控件表，避免读到旧引用
             View view = viewFactory.create(root, getContext());
             if (view != null) {
@@ -114,6 +115,53 @@ public class SDUIScreen extends Fragment {
             errText.setTextSize(14);
             rootContainer.removeAllViews();
             rootContainer.addView(errText);
+        }
+    }
+
+    /**
+     * 应用根节点声明的全屏遮罩。默认保留既有靛蓝渐变；{@code dimBackground=false} 关闭遮罩，
+     * {@code overlayColor} 使用 {@code #RRGGBB}/{@code #AARRGGBB} 单色遮罩。
+     */
+    private void applyScreenBackground(WidgetNode root) {
+        if (!root.getBool("dimBackground", true)) {
+            rootContainer.setBackground(null);
+            return;
+        }
+
+        String overlayColor = root.getString("overlayColor", null);
+        if (overlayColor == null || overlayColor.isBlank()) {
+            applyDefaultBackground();
+            return;
+        }
+
+        Integer color = parseColor(overlayColor);
+        if (color == null) {
+            LOGGER.warn("[WindUI] overlayColor 非法，回退默认背景: {}", overlayColor);
+            applyDefaultBackground();
+            return;
+        }
+
+        var background = new GradientDrawable();
+        background.setColor(color);
+        rootContainer.setBackground(background);
+    }
+
+    private void applyDefaultBackground() {
+        rootContainer.setBackground(
+                new GradientDrawable(GradientDrawable.Orientation.TL_BR, BG_GRADIENT));
+    }
+
+    private static Integer parseColor(String value) {
+        String hex = value.startsWith("#") ? value.substring(1) : value;
+        if (hex.length() == 6) {
+            hex = "FF" + hex;
+        } else if (hex.length() != 8) {
+            return null;
+        }
+        try {
+            return (int) Long.parseLong(hex, 16);
+        } catch (NumberFormatException ignored) {
+            return null;
         }
     }
 

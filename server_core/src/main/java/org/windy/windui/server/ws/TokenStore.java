@@ -1,7 +1,6 @@
 package org.windy.windui.server.ws;
 
 import java.security.SecureRandom;
-import java.util.HexFormat;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -42,6 +41,12 @@ public final class TokenStore {
     private String newToken() {
         byte[] b = new byte[24];
         rnd.nextBytes(b);
-        return HexFormat.of().formatHex(b);
+        // 手写十六进制（不用 Java 17 的 HexFormat，因 server_core 编到 Java 16 地板）。
+        StringBuilder sb = new StringBuilder(b.length * 2);
+        for (byte x : b) {
+            sb.append(Character.forDigit((x >> 4) & 0xF, 16));
+            sb.append(Character.forDigit(x & 0xF, 16));
+        }
+        return sb.toString();
     }
 }

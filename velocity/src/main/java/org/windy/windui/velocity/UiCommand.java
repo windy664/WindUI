@@ -27,7 +27,8 @@ import java.util.Set;
  */
 public class UiCommand implements SimpleCommand {
 
-    private static final List<String> PUBLIC_SUBCOMMANDS = List.of("open", "reload", "list", "hud");
+    private static final List<String> PUBLIC_SUBCOMMANDS =
+            List.of("open", "reload", "list", "hud", "status");
 
     private final ProxyServer server;
     private final GuiDriver driver;
@@ -76,8 +77,38 @@ public class UiCommand implements SimpleCommand {
             case "event" -> handleEvent(source, args);
             case "hello" -> handleHello(source, args);
             case "hud" -> handleHud(source, args);
+            case "status" -> handleStatus(source, args);
             default -> usage(source);
         }
+    }
+
+    /** {@code /windui status [玩家]} —— 查看 WS 会话与客户端协议版本，供部署验收和排障。 */
+    private void handleStatus(CommandSource source, String[] args) {
+        Player target;
+        if (args.length >= 2) {
+            target = server.getPlayer(args[1]).orElse(null);
+            if (target == null) {
+                source.sendMessage(Component.text("玩家不在线: " + args[1], NamedTextColor.RED));
+                return;
+            }
+        } else if (source instanceof Player player) {
+            target = player;
+        } else {
+            source.sendMessage(Component.text(
+                    "控制台需指定玩家: /windui status <玩家>", NamedTextColor.RED));
+            return;
+        }
+
+        boolean connected = ws != null && ws.isConnected(target.getUniqueId());
+        int protocolVersion = driver.clients().versionOf(target.getUniqueId());
+        NamedTextColor color = connected && protocolVersion > 0
+                ? NamedTextColor.GREEN
+                : NamedTextColor.YELLOW;
+        source.sendMessage(Component.text(
+                "WindUI 状态 " + target.getUsername()
+                        + ": ws=" + (connected ? "connected" : "disconnected")
+                        + ", protocol=" + protocolVersion,
+                color));
     }
 
     /** {@code /windui hud [<id>|clear]} —— 从 huds/ 推一个 HUD 到自己，默认 id 为 {@code demo}。 */
@@ -187,6 +218,7 @@ public class UiCommand implements SimpleCommand {
         source.sendMessage(Component.text("用法:", NamedTextColor.YELLOW));
         source.sendMessage(Component.text("  /windui open <界面> [玩家]", NamedTextColor.GRAY));
         source.sendMessage(Component.text("  /windui hud [HUD|clear]", NamedTextColor.GRAY));
+        source.sendMessage(Component.text("  /windui status [玩家]", NamedTextColor.GRAY));
         source.sendMessage(Component.text("  /windui reload", NamedTextColor.GRAY));
         source.sendMessage(Component.text("  /windui list", NamedTextColor.GRAY));
     }

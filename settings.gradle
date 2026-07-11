@@ -4,6 +4,10 @@ pluginManagement {
         gradlePluginPortal()
         maven { url = 'https://maven.neoforged.net/releases' }
     }
+    plugins {
+        // Kotlin：仅 server_core 的 WS 传输层用（协程+异步NIO 扛上万并发）；其余模块保持 Java。
+        id 'org.jetbrains.kotlin.jvm' version '2.1.0'
+    }
 }
 
 plugins {
@@ -12,3 +16,5 @@ plugins {
 
 rootProject.name = 'WindUI'
 include 'core', 'client_modernui', 'server_core', 'neoforge_26_1_2', 'neoforge_1_21_1', 'velocity'
+// 服务端 host（平台 B）：现代 Paper（bukkit_common + bukkit_paper_26）。老版 bukkit_1_16 待建。
+include 'bukkit_common', 'bukkit_paper_26'

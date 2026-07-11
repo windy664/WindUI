@@ -92,6 +92,12 @@ public final class UiScriptService {
             // 非模态 HUD:推一组锚定面板(每个 {anchor,x,y,root:<ui节点>});hudClear 清空
             ctx.hud      = function(panels){ __fx.push('hud\\t' + JSON.stringify(panels || [])); };
             ctx.hudClear = function(){ __fx.push('hudClear'); };
+            // 真库存（仅后端 Bukkit/Paper host 有效；纯代理 host 静默跳过）。
+            ctx.give     = function(id, count){ __fx.push('give\\t' + id + '\\t' + (count || 1)); };
+            ctx.take     = function(id, count){ __fx.push('take\\t' + id + '\\t' + (count || 1)); };
+            // ctx.inventory 由 host 以 JSON 字符串注入（沙箱不能直传 Java List）→ 这里还原成原生数组;
+            // 无库存的 host（代理）注入不到 → 空数组。
+            ctx.inventory = (typeof ctx.inventory === 'string') ? JSON.parse(ctx.inventory) : (ctx.inventory || []);
 
             var ui = {
               _merge: function(base, extra){
@@ -120,6 +126,8 @@ public final class UiScriptService {
               divider: function(props){ return { type: 'Divider', props: ui._merge({ width: 'match', height: 1, margin: 6 }, props) }; },
               // 3D 模型/实体：type=item(默认)/entity/geckolib；model=物品或实体或模型 id。须给 width/height。
               model:   function(model, props){ return { type: 'Model3D', props: ui._merge({ type: 'item', model: model, width: 64, height: 64 }, props) }; },
+              // 原版生物实体；modelScale 是传给物品栏实体渲染器的像素尺寸。
+              entityModel: function(entity, props){ return { type: 'Model3D', props: ui._merge({ type: 'entity', model: entity, width: 96, height: 96, modelScale: 30 }, props) }; },
               // GeckoLib 模型（软依赖，客户端无 GeckoLib 则跳过）。geo/texture 为资源路径，可选 animation 循环动画名。
               geckoModel: function(geo, texture, props){ return { type: 'Model3D', props: ui._merge({ type: 'geckolib', geo: geo, texture: texture, width: 96, height: 96 }, props) }; },
               // 给任意节点挂交互事件；events 键：onClick/onRightClick/onHoverEnter/onHoverLeave/onTextChange，
@@ -135,7 +143,7 @@ public final class UiScriptService {
     private static final String BUNDLED_DIR = "/windui/scripts/";
 
     /** 随 jar 内置的默认脚本 id（首次运行释放到磁盘）。 */
-    private static final List<String> DEFAULT_IDS = List.of("shop", "showcase", "events");
+    private static final List<String> DEFAULT_IDS = List.of("shop", "showcase", "events", "backpack");
 
     private final Path scriptsDir;
     private final Map<String, String> scripts = new HashMap<>(); // id -> js 源码

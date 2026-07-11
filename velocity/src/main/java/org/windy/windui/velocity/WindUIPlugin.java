@@ -14,17 +14,9 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.slf4j.Logger;
 import org.windy.windui.core.gui.GuiEventBus;
-import org.windy.windui.core.gui.GuiRegistry;
-import org.windy.windui.core.gui.HudRegistry;
-import org.windy.windui.core.protocol.EventCodec;
 import org.windy.windui.core.ws.WsBootstrap;
-import org.windy.windui.server.GuiDriver;
-import org.windy.windui.server.asset.ImgStore;
-import org.windy.windui.server.script.UiScriptService;
-import org.windy.windui.server.ws.TokenStore;
-import org.windy.windui.server.ws.WsServer;
+import org.windy.windui.server.WindUiRuntime;
 
-import java.io.IOException;
 import java.nio.file.Path;
 import java.util.UUID;
 
@@ -37,16 +29,16 @@ import java.util.UUID;
 )
 public class WindUIPlugin {
 
+    private static final int WS_MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
+
     private final ProxyServer server;
     private final Logger logger;
     private final Path dataDirectory;
-    private GuiDriver driver;
-    private GuiEventBus<Player> eventBus;
 
-    // WebSocket 传输（独立端口，取代旧的裸 Netty 插件消息通道）
-    private WsSettings settings;
-    private TokenStore tokens;
-    private WsServer ws;
+    // 共享运行时（registries+driver+WS+token+事件路由，全在 server_core）
+    private WindUiRuntime runtime;
+    // 业务回调（结构化 JSON 界面按钮的演示处理器；平台特定，留在插件里）
+    private GuiEventBus<Player> eventBus;
 
     @Inject
     public WindUIPlugin(ProxyServer server, Logger logger, @DataDirectory Path dataDirectory) {
@@ -57,23 +49,6 @@ public class WindUIPlugin {
 
     @Subscribe
     public void onProxyInitialize(ProxyInitializeEvent event) {
-        // 文件驱动 GUI：plugins/windui/guis/*.json + JS 脚本界面：plugins/windui/scripts/*.js
-        GuiRegistry registry = new GuiRegistry(dataDirectory.resolve("guis"));
-        int loaded = registry.load();
-        UiScriptService scriptService = new UiScriptService(dataDirectory.resolve("scripts"));
-        int scriptsLoaded = scriptService.load();
-
-        // 自定义图片仓库：plugins/windui/img/
-        ImgStore imgStore = new ImgStore(dataDirectory.resolve("img"));
-        imgStore.init();
-
-        // 文件驱动 HUD：plugins/windui/huds/*.json
-        HudRegistry hudRegistry = new HudRegistry(dataDirectory.resolve("huds"));
-        int hudsLoaded = hudRegistry.load();
-
-        // 平台无关的 GUI 驱动（open/event/效果分派全在 server_core）
-        this.driver = new GuiDriver(registry, scriptService, imgStore, hudRegistry);
-
         // 按钮回调事件总线；业务逻辑注册到此（演示处理器验证回程）
         eventBus = new GuiEventBus<>();
         eventBus.register("buy_diamond", (player, data) -> {
@@ -90,30 +65,18 @@ public class WindUIPlugin {
                 player.sendMessage(Component.text(
                         "[WindUI] 已确认（演示，服务端已收到回调）", NamedTextColor.AQUA)));
 
-        // ===== WebSocket 传输 =====
-        settings = WsSettings.load(dataDirectory, logger);
-        tokens = new TokenStore();
-        if (settings.enabled()) {
-            ws = new WsServer(settings.bind(), settings.port(), settings.maxMessageBytes(), new WsHandler());
-            try {
-                ws.start();
-                logger.info("[WindUI] WebSocket 监听 {}:{}（记得放行防火墙）",
-                        settings.bind().isEmpty() ? "0.0.0.0" : settings.bind(), ws.port());
-            } catch (IOException e) {
-                logger.error("[WindUI] WebSocket 启动失败（端口占用？），UI 下发不可用", e);
-                ws = null;
-            }
-        } else {
-            logger.info("[WindUI] WebSocket 服务已在配置中禁用（ws-enabled=false）");
-        }
+        // 共享运行时装配：文件驱动 registries + driver + WebSocket + token + 事件路由
+        WsSettings settings = WsSettings.load(dataDirectory, logger);
+        VelocityPlatformAdapter adapter = new VelocityPlatformAdapter(server, logger, eventBus);
+        runtime = WindUiRuntime.start(dataDirectory, settings.port(), WS_MAX_MESSAGE_BYTES, adapter);
+        adapter.bindWs(runtime.ws());
 
         server.getCommandManager().register(
                 server.getCommandManager().metaBuilder("windui").build(),
-                new UiCommand(server, driver, eventBus, ws)
+                new UiCommand(server, runtime.driver(), eventBus, runtime.ws())
         );
 
-        logger.info("WindUI Velocity plugin loaded, {} JSON GUI(s) + {} JS script(s) + {} HUD(s)",
-                loaded, scriptsLoaded, hudsLoaded);
+        logger.info("WindUI Velocity plugin loaded");
     }
 
     /**
@@ -122,56 +85,24 @@ public class WindUIPlugin {
      */
     @Subscribe
     public void onServerConnected(ServerPostConnectEvent event) {
-        if (ws == null) return;
+        if (runtime == null || !runtime.wsRunning()) return;
         Player player = event.getPlayer();
-        String token = tokens.tokenFor(player.getUniqueId());
+        String token = runtime.tokenFor(player.getUniqueId());
         player.sendMessage(Component.text(
-                WsBootstrap.encode(settings.publicHost(), ws.port(), token)));
+                WsBootstrap.encode("", runtime.wsPort(), token)));
     }
 
-    /** 玩家断开：清理其界面追踪、图片记录与 token。 */
+    /** 玩家断开：清理其界面追踪、WS 连接与 token。 */
     @Subscribe
     public void onDisconnect(DisconnectEvent event) {
+        if (runtime == null) return;
         UUID uuid = event.getPlayer().getUniqueId();
-        if (driver != null) driver.clear(uuid);
-        if (tokens != null) tokens.remove(uuid);
+        runtime.onPlayerDisconnect(uuid);
     }
 
     /** 代理关闭：停 WebSocket。 */
     @Subscribe
     public void onProxyShutdown(ProxyShutdownEvent event) {
-        if (ws != null) ws.stop();
-    }
-
-    /** WebSocket 服务端回调：鉴权 + 上行 hello/event 分派。 */
-    private final class WsHandler implements WsServer.Handler {
-        @Override
-        public UUID authenticate(String token) {
-            return tokens.resolve(token);
-        }
-
-        @Override
-        public void onHello(UUID player, int version) {
-            driver.clients().noteHello(player, version);
-        }
-
-        @Override
-        public void onEvent(UUID player, byte[] eventBytes) {
-            Player p = server.getPlayer(player).orElse(null);
-            if (p == null) return;
-            try {
-                EventCodec.Event ev = EventCodec.decode(eventBytes);
-                if (!driver.event(new VelocityUiHost(p, server, ws), ev.eventId(), ev.data())) {
-                    eventBus.dispatch(ev.eventId(), p, ev.data());
-                }
-            } catch (Exception ex) {
-                logger.warn("[WindUI] 事件回程解析失败", ex);
-            }
-        }
-
-        @Override
-        public void onDisconnect(UUID player) {
-            // WS 连接断开（玩家可能仍在线，只是 UI 通道断了）；MC 断线由 DisconnectEvent 清理。
-        }
+        if (runtime != null) runtime.stop();
     }
 }

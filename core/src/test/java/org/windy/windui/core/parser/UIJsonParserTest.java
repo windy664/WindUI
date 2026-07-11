@@ -1,8 +1,12 @@
 package org.windy.windui.core.parser;
 
 import com.google.gson.JsonParseException;
+import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -21,6 +25,42 @@ class UIJsonParserTest {
         assertEquals(1, node.children().size());
         assertEquals("TextView", node.children().get(0).type());
         assertEquals("hi", node.children().get(0).getString("text", ""));
+    }
+
+    @Test
+    void preservesRootScreenBackgroundProps() {
+        WidgetNode node = UIJsonParser.parse(
+                "{\"type\":\"FrameLayout\",\"props\":{"
+                        + "\"dimBackground\":false,\"overlayColor\":\"#80000000\"}}"
+        );
+
+        assertEquals(false, node.getBool("dimBackground", true));
+        assertEquals("#80000000", node.getString("overlayColor", null));
+    }
+
+    @Test
+    void bundledGuisParseAndUseIosVisualTokens() throws IOException {
+        for (String id : List.of("menu_main", "shop_main", "confirm", "welcome")) {
+            String json = resourceText("/windui/guis/" + id + ".json");
+            WidgetNode root = UIJsonParser.parse(json);
+
+            assertEquals("LinearLayout", root.type(), id + " 根节点类型应稳定");
+            assertTrue(json.contains("#007AFF") || json.contains("#FF3B30"),
+                    id + " 应使用 iOS 系统强调色");
+            assertTrue(json.contains("#F5FFFFFF") || json.contains("#F8FFFFFF"),
+                    id + " 应使用半透明白色卡片");
+            assertTrue(root.getString("overlayColor", "").startsWith("#"),
+                    id + " 应显式覆盖默认背景");
+        }
+    }
+
+    @Test
+    void bundledHudIsValidJsonAndUsesIosVisualTokens() throws IOException {
+        String json = resourceText("/windui/huds/demo.json");
+
+        assertTrue(JsonParser.parseString(json).isJsonArray());
+        assertTrue(json.contains("#EFFFFFFF"), "HUD 应使用半透明白色小组件背景");
+        assertTrue(json.contains("#007AFF"), "HUD 应使用 iOS 系统蓝");
     }
 
     @Test
@@ -151,5 +191,14 @@ class UIJsonParserTest {
 
         assertEquals(1, actions.size());
         assertEquals("closeScreen", actions.get(0).get("action"));
+    }
+
+    private static String resourceText(String path) throws IOException {
+        try (InputStream stream = UIJsonParserTest.class.getResourceAsStream(path)) {
+            if (stream == null) {
+                throw new IOException("缺少测试资源 " + path);
+            }
+            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+        }
     }
 }
