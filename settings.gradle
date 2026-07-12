@@ -16,5 +16,7 @@ plugins {
 
 rootProject.name = 'WindUI'
 include 'core', 'client_modernui', 'server_core', 'neoforge_26_1_2', 'neoforge_1_21_1', 'velocity'
-// 服务端 host（平台 B）：现代 Paper（bukkit_common + bukkit_paper_26）。老版 bukkit_1_16 待建。
-include 'bukkit_common', 'bukkit_paper_26'
+// 服务端 host（平台 B），各自独立骑 server_core：
+//   bukkit —— legacy Bukkit API（plugin.yml + String 消息 + CommandExecutor），全版本通用
+//   paper  —— 现代 Paper API（paper-plugin.yml + Adventure + Brigadier），为 26.x+ 服务（Paper 26.x 大改）
+include 'bukkit', 'paper'

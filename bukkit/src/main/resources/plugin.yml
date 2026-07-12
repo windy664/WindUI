@@ -1,0 +1,10 @@
+name: WindUI
+version: 1.0-SNAPSHOT
+main: org.windy.windui.bukkit.BukkitPlugin
+api-version: '1.16'
+description: Server-Driven UI for Minecraft (Bukkit host, all versions)
+authors: [windy]
+commands:
+  windui:
+    description: WindUI 界面命令
+    usage: /windui open <界面> [玩家] | hud | list | reload | status

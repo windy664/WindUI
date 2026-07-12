@@ -1,8 +1,0 @@
-name: WindUI
-version: 1.0-SNAPSHOT
-main: org.windy.windui.bukkit.WindUiPaperPlugin
-api-version: '1.21'
-description: Server-Driven UI for Minecraft (Paper host, 26.x target)
-authors: [windy]
-# 入口/命令/库存全在 bukkit_common（共享）。paper-plugin.yml 无 commands 块 →
-# /windui 经 LifecycleEvents.COMMANDS + Brigadier 注册（见 WindUiBrigadier）。

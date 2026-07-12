@@ -1,4 +1,4 @@
-package org.windy.windui.bukkit;
+package org.windy.windui.paper;
 
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
@@ -16,22 +16,16 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Bukkit/Paper 侧的 {@link UiHost} 实现（平台薄 glue），与 {@code VelocityUiHost} 对称：把
- * {@link org.windy.windui.server.GuiDriver} 的平台无关请求落到具体 Bukkit {@link Player}。
- * <p>
- * 下发通道全走独立端口的 {@link WsServer}（按玩家 UUID 找 WS 连接写帧）；聊天消息走 Paper 原生
- * Adventure {@code player.sendMessage}。只碰 1.21↔26.x 稳定的 API，故本类落 bukkit_common。
+ * Paper 侧的 {@link UiHost}：下发走独立端口的 {@link WsServer}；聊天消息走 Paper 原生 Adventure。
  */
-public final class BukkitUiHost implements UiHost {
+public final class PaperUiHost implements UiHost {
 
     private final Player player;
     private final WsServer ws;
-    private final BukkitInventoryOps inventoryOps; // 可空：无真库存能力时不提供
 
-    public BukkitUiHost(Player player, WsServer ws, BukkitInventoryOps inventoryOps) {
+    public PaperUiHost(Player player, WsServer ws) {
         this.player = player;
         this.ws = ws;
-        this.inventoryOps = inventoryOps;
     }
 
     @Override
@@ -44,30 +38,22 @@ public final class BukkitUiHost implements UiHost {
         Map<String, Object> ctx = new LinkedHashMap<>();
         ctx.put("player", player.getName());
         ctx.put("uuid", player.getUniqueId().toString());
-        ctx.put("server", player.getWorld().getName()); // 单机 Paper 无子服，用世界名
+        ctx.put("server", player.getWorld().getName());
         ctx.put("ping", player.getPing());
         ctx.put("online", Bukkit.getOnlinePlayers().size());
-        // 真库存快照以 JSON 字符串注入（沙箱不能直传 Java List）；脚本读 ctx.inventory（PRELUDE 已 JSON.parse）。
-        if (inventoryOps != null) {
-            ctx.put("inventory", ItemView.toJsonArray(inventoryOps.snapshot(player)));
-        }
+        ctx.put("inventory", ItemView.toJsonArray(new PaperInventoryOps(player).snapshot()));
         return ctx;
     }
 
     @Override
-    public InventoryOps inventory() {
-        return inventoryOps == null ? null : new BukkitInventoryAdapter(player, inventoryOps);
-    }
-
-    @Override
     public String applyPlaceholders(String json) {
-        return Placeholders.apply(json, BukkitPlaceholders.forPlayer(player));
+        return Placeholders.apply(json, PaperPlaceholders.forPlayer(player));
     }
 
-    /** 统一下发：WS 未启用（null）时静默跳过，避免 NPE。 */
     private void send(byte channel, byte[] payload) {
-        if (ws == null) return;
-        ws.send(player.getUniqueId(), channel, payload);
+        if (ws != null) {
+            ws.send(player.getUniqueId(), channel, payload);
+        }
     }
 
     @Override
@@ -98,5 +84,10 @@ public final class BukkitUiHost implements UiHost {
     @Override
     public void sendHud(byte[] payload) {
         send(WsProtocol.HUD, payload);
+    }
+
+    @Override
+    public InventoryOps inventory() {
+        return new PaperInventoryOps(player);
     }
 }

@@ -1,0 +1,40 @@
+// Paper host —— 现代 Paper API（Adventure 消息 + Brigadier 命令 + paper-plugin.yml），为 MC 26.x+ 服务
+// （Paper 26.x API 大改，故本模块专供 26.x 之后版本）。直接骑 server_core，不经任何中间共享层。
+plugins {
+    id 'java-library'
+}
+
+// MC 26.x / Youer 26.2 运行时是 Java 25。入口编到真实目标 API，保证在 26.x 服上加载正确。
+java.toolchain.languageVersion = JavaLanguageVersion.of(25)
+
+base {
+    archivesName = 'windui-paper'
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://repo.papermc.io/repository/maven-public/' }
+}
+
+dependencies {
+    // server_core（含 core + Rhino + Kotlin 协程 WS 传输）
+    implementation project(':server_core')
+    // Paper 26.2 API（编译期；运行时由服务端提供）
+    compileOnly 'io.papermc.paper:paper-api:26.2.build.48-alpha'
+}
+
+evaluationDependsOn(':core')
+evaluationDependsOn(':server_core')
+
+// 手动把 core + server_core 的输出 + Rhino + Kotlin stdlib/协程打进最终 jar（不引 shadow）。
+jar {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from(project(':core').sourceSets.main.output)
+    from(project(':server_core').sourceSets.main.output)
+    from({
+        configurations.runtimeClasspath.findAll {
+            it.name.contains('rhino') || it.name.contains('kotlin') || it.name.startsWith('annotations')
+        }.collect { zipTree(it) }
+    })
+    dependsOn ':core:classes', ':server_core:classes'
+}
